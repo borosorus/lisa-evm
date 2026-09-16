@@ -1,0 +1,228 @@
+object "LISA" {
+    code {
+        datacopy(0, dataoffset("runtime"), datasize("runtime"))
+        return(0, datasize("runtime"))
+    }
+    /*
+        An INSTRUCTION (OPCODE) is 1 byte (8 bits)
+        STACK grows upwards
+
+        Need a memory layout here
+        0x00 -> free vm stack
+        0x20 -> free vm mem
+        0x40 -> free mem (maxxed out at X) ??
+        0x60 -> Start of our mem -
+        0x80 -
+        0x100 -
+        0x120 -> up to here.
+        0x140 -> start of vm stack STACK_BASE()
+        0x160
+        0x180
+        0x200
+        0x220
+        0x240
+        0x260
+        0x280
+        0x300
+        0x320
+        0x340
+        0x360
+        0x380
+        0x400
+        0x420
+        0x440 -> end of vm stack (16 slots)
+        0x380 -> VM mem base MEM_BASE()
+
+
+        --- ISA ----
+        Group	    Instruction	    Stack effect / role                                 OPCODE
+        --------------------------------------------------------------------------------------------
+        Constants	PUSHn	        [] → [x], n=1..32 encoded in opcode range           0x01-0x20
+        Stack	    POP	            [x] → []                                            0x21
+                    DUP n	        duplicate stack item                                0x22
+                    SWAP n	        swap stack items                                    0x23
+        Math	    ADD	            [a,b] → [a+b]                                       0x24
+                    SUB	            [a,b] → [a-b]                                       0x25
+                    MUL	            [a,b] → [a*b]                                       0x26
+                    DIV	            [a,b] → [a/b]                                       0x27
+        Compare	    LT	            [a,b] → [a<b]                                       0x28
+                    EQ	            [a,b] → [a==b]                                      0x29
+        Control	    JMP rel16	    relative jump                                       0x30
+                    JZ rel16	    pop condition; jump if zero                         0x31
+        Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x32
+                    MSTORE	        [offset,value] → []                                 0x33
+        Calls	    CALL	        [target,value,offset,len] → [success]               0x34
+                    STATICCALL	    [target,offset,len] → [success]                     0x35
+        Return data	RDLOAD	        [offset] → [word]                                   0x36
+        Context	    SELF	        [] → [wallet address]                               0x37
+        Halt	    STOP	        success                                             0x00
+                    REVERT	        revert                                              0x38
+
+
+    */
+    object "runtime" {
+        code {
+            // We'll make it expensive V0 for simplicity, just read the whole word each time, shift it, obtain opcode, execute and move pc
+            let size := calldatasize()
+            for { let pc_ := 0 } lt(pc_, calldatasize()) {} {
+                let instr := parse_instr_at(pc_)
+                pc_ := execute(instr, pc_)
+            }
+
+            function STACK_BASE() -> v {
+                v := 0x140
+            }
+            function STACK_SIZE() -> v {
+                v := 16
+            }
+
+            function MEM_BASE() -> v {
+                v := add(STACK_BASE(),mul(0x20,STACK_SIZE()))
+            }
+
+            function parse_instr_at(calldata_offset) -> instr {
+                let word := calldataload(calldata_offset)
+                instr := shr(252,word)
+            }
+            function execute(instr, pc_) -> new_pc {
+                if iszero(instr) {return(0,0)} //STOP
+                // PUSH bytes
+                if lt(instr, 0x21) {
+                    new_pc := push_(instr, pc_)
+                }
+                // this will compare any way (even if push instr or 0x00)
+                switch instr
+                case 0x21 {
+                    new_pc := pop_(pc_)
+                }
+                case 0x22 {
+                    new_pc := dup_(pc_)
+                }
+                case 0x23 {
+                    new_pc := swap_(pc_)
+                }
+                case 0x24 {
+                    new_pc := add_(pc_)
+                }
+                case 0x25 {
+                    new_pc := sub_(pc_)
+                }
+                case 0x26 {
+                    new_pc := mul_(pc_)
+                }
+                case 0x27 {
+                    new_pc := div_(pc_)
+                }
+                case 0x28 {
+                    new_pc := lt_(pc_)
+                }
+                case 0x29 {
+                    new_pc := eq_(pc_)
+                }
+                case 0x30 {
+
+                }
+                case 0x31 {
+
+                }
+                default {}
+            }
+            function push_(size_, pc_) -> new_pc {
+                let value := calldataload(add(pc_, 1)) // value is at pc_ (instr) + 1 (byte)
+                value := shr(mul(size_,8), value) // truncating to recover only value (given size)
+                push_to_stack(value)
+                new_pc := add(pc_,add(1, size_))
+            }
+
+            function push_to_stack(value) {
+                let _new_stack := add(mload(0x00), 0x20)
+                if eq(_new_stack, MEM_BASE()) {
+                    revert(0,0) // stack has overgrown
+                }
+                mstore(_new_stack, value)
+                mstore(0x00, _new_stack)
+            }
+
+            function pop_(pc_) -> new_pc {
+                pop(pop_from_stack())
+                new_pc := add(pc_,1)
+            }
+
+            function pop_from_stack() -> value {
+                let _stack := mload(0x00)
+                value := mload(_stack)
+                if not(eq(_stack,STACK_BASE())) {
+                    mstore(0x00, sub(_stack,0x20))
+                }
+            }
+
+            function dup_(pc_) -> new_pc {
+                let n := parse_instr_at(add(pc_,1)) // DUP n
+                if iszero(n) {revert(0,0)}
+                let _stack := mload(0x00)
+                let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
+                if gt(n,stack_size) {revert(0,0)}
+                let value := mload(sub(_stack, mul(sub(n,1),0x20)))
+                push_to_stack(value)
+                new_pc := add(pc_,2) // instr and n
+            }
+
+            function swap_(pc_) -> new_pc {
+                let n := parse_instr_at(add(pc_,1)) // SWAP n
+                if iszero(n) {revert(0,0)}
+                let _stack := mload(0x00)
+                let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
+                if gt(n,stack_size) {revert(0,0)}
+                let _stack_n := sub(_stack, mul(sub(n,1),0x20))
+
+                let value_n := mload(_stack_n)
+                let value_t := mload(_stack)
+
+                mstore(_stack_n, value_t)
+                mstore(_stack, value_n)
+                new_pc := add(pc_,2) // instr and n
+            }
+
+            function add_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(add(a,b))
+                new_pc := add(pc_,1)
+            }
+            function sub_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(sub(a,b))
+                new_pc := add(pc_,1)
+            }
+            function mul_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(mul(a,b))
+                new_pc := add(pc_,1)
+            }
+            function div_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(div(a,b))
+                new_pc := add(pc_,1)
+            }
+            function lt_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(lt(a,b))
+                new_pc := add(pc_,1)
+            }
+            function eq_(pc_) -> new_pc {
+                let a := pop_from_stack()
+                let b := pop_from_stack()
+                push_to_stack(eq(a,b))
+                new_pc := add(pc_,1)
+            }
+
+            function jmp_() -> pc_offset {
+
+            }
+        }
+    }
+}
