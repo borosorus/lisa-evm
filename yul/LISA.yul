@@ -8,9 +8,9 @@ object "LISA" {
         STACK grows upwards
 
         Need a memory layout here
-        0x00 -> free vm stack
-        0x20 -> free vm mem
-        0x40 -> free mem (maxxed out at X) ??
+        0x00 -> current vm stack -> CURRENT IS USEd
+        0x20 -> free vm mem -> FREE ISN'T USED
+        0x40 -> free our mem (maxxed out at X) ??
         0x60 -> Start of our mem -
         0x80 -
         0x100 -
@@ -62,6 +62,8 @@ object "LISA" {
     */
     object "runtime" {
         code {
+            //TODO init mem and stack pointers
+
             // We'll make it expensive V0 for simplicity, just read the whole word each time, shift it, obtain opcode, execute and move pc
             let size := calldatasize()
             for { let pc_ := 0 } lt(pc_, calldatasize()) {} {
@@ -82,7 +84,7 @@ object "LISA" {
 
             function parse_instr_at(calldata_offset) -> instr {
                 let word := calldataload(calldata_offset)
-                instr := shr(252,word)
+                instr := shr(248,word)
             }
             function execute(instr, pc_) -> new_pc {
                 if iszero(instr) {return(0,0)} //STOP
@@ -120,10 +122,16 @@ object "LISA" {
                     new_pc := eq_(pc_)
                 }
                 case 0x30 {
-
+                    new_pc := jmp_(pc_)
                 }
                 case 0x31 {
-
+                    new_pc := jz_(pc_)
+                }
+                case 0x32 {
+                    new_pc := blob_(pc_)
+                }
+                case 0x33 {
+                    new_pc := mstore_(pc_)
                 }
                 default {}
             }
@@ -220,8 +228,57 @@ object "LISA" {
                 new_pc := add(pc_,1)
             }
 
-            function jmp_() -> pc_offset {
+            // REL FROM PC_
+            function jmp_(pc_) -> new_pc {
+                let sint16 := shr(240,calldataload(add(pc_,1)))
+                new_pc := add_signed16(pc_, sint16)
+            }
 
+            function jz_(pc_) -> new_pc {
+                let sint16 := shr(240,calldataload(add(pc_,1)))
+                let value := pop_from_stack()
+                switch value
+                case 0 {
+                    new_pc := add_signed16(pc_, sint16)
+                }
+                default {
+                    new_pc := add(pc_, 3) //instr and 16 bits signed
+                }
+            }
+
+            // sign-magnitude add (16 bits)
+            function add_signed16(uint256, sint16) -> res {
+                sint16 := shr(240,shl(240,sint16))
+                let sign := shr(15,sint16)
+                switch sign
+                case 0 {res := add(uint256,sint16)}
+                case 1 {res := sub(uint256,sint16)}
+            }
+
+            function blob_(pc_) -> new_pc {
+                let len := calldataload(add(pc_,1)) // len in bytes, must be div by 32
+                pc_ := add(pc_,33) // instr and len
+                let _mem_offset := mload(0x20)
+
+                let _mem := _mem_offset
+                for { let i := 0 } lt(i, len) { i := add(i, 0x20) }
+                {
+                    let value := calldataload(pc_)
+                    mstore(_mem, value)
+                    _mem := add(_mem,0x20)
+                    pc_ := add(pc_,0x20)
+                }
+                push_to_stack(sub(_mem_offset, MEM_BASE())) // PUSHING VIRTUAL OFFSET 
+                push_to_stack(len)
+
+                mstore(0x20, _mem)
+                new_pc := pc_
+            }
+
+            function mstore_(pc_) -> new_pc {
+                let value := pop_from_stack()
+                let offset := pop_from_stack()
+                mstore(add(offset, MEM_BASE()), value) //STORING USING VIRTUAL OFFSET
             }
         }
     }
