@@ -13,26 +13,28 @@ object "LISA" {
         0x40 -> free our mem (maxxed out at X) ??
         0x60 -> Start of our mem -
         0x80 -
+        0xa0
+        0xc0
+        0xe0
         0x100 -
         0x120 -> up to here.
         0x140 -> start of vm stack STACK_BASE()
         0x160
         0x180
+        0x1a0
+        0x1c0
+        0x1e0
         0x200
         0x220
         0x240
         0x260
         0x280
+        0x2a0
+        0x2c0
+        0x2e0
         0x300
-        0x320
-        0x340
-        0x360
-        0x380
-        0x400
-        0x420
-        0x440 -> end of vm stack (16 slots)
-        0x380 -> VM mem base MEM_BASE()
-
+        0x320 -> end of vm stack (16 slots)
+        0x340 -> VM mem base MEM_BASE()
 
         --- ISA ----
         Group	    Instruction	    Stack effect / role                                 OPCODE
@@ -89,12 +91,9 @@ object "LISA" {
                 instr := shr(248,word)
             }
             function execute(instr, pc_) -> new_pc {
+                if gt(instr, 0x38) {invalid()}
+
                 if iszero(instr) {stop()} //STOP
-                // PUSH bytes
-                if lt(instr, 0x21) {
-                    new_pc := push_(instr, pc_)
-                }
-                // this will compare any way (even if push instr or 0x00)
                 switch instr
                 case 0x21 {
                     new_pc := pop_(pc_)
@@ -150,17 +149,20 @@ object "LISA" {
                 case 0x38 {
                     stop()
                 }
-                default {invalid()}
+                default {
+                    // PUSH bytes
+                    new_pc := push_(instr, pc_)
+                }
             }
             function push_(size_, pc_) -> new_pc {
                 let value := calldataload(add(pc_, 1)) // value is at pc_ (instr) + 1 (byte)
-                value := shr(mul(size_,8), value) // truncating to recover only value (given size)
+                value := shr(sub(256,mul(size_,8)), value) // truncating to recover only value (given size)
                 push_to_stack(value)
                 new_pc := add(pc_,add(1, size_))
             }
 
             function push_to_stack(value) {
-                let _new_stack := add(mload(0x00), 0x20)
+                let _new_stack := add(mload(0x00), 0x20) //TODO figure out start of stack
                 if eq(_new_stack, MEM_BASE()) {
                     invalid() // stack has overgrown
                 }
@@ -299,20 +301,20 @@ object "LISA" {
             }
 
             function call_(pc_) -> new_pc {
-                let target := pop_from_stack()
-                let value := pop_from_stack()
-                let offset := pop_from_stack()
                 let len := pop_from_stack()
-                let success := call(gas(),target,value,offset,len,0,0)
+                let offset := pop_from_stack()
+                let value := pop_from_stack()
+                let target := pop_from_stack()
+                let success := call(gas(),target,value,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
                 push_to_stack(returndatasize())
                 push_to_stack(success)
                 new_pc := add(pc_,1)
             }
             function staticcall_(pc_) -> new_pc {
-                let target := pop_from_stack()
-                let offset := pop_from_stack()
                 let len := pop_from_stack()
-                let success := staticcall(gas(),target,offset,len,0,0)
+                let offset := pop_from_stack()
+                let target := pop_from_stack()
+                let success := staticcall(gas(),target,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
                 push_to_stack(returndatasize())
                 push_to_stack(success)
                 new_pc := add(pc_,1)

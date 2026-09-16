@@ -12,10 +12,10 @@ test: build
 	forge test --offline -vvv
 
 debug: build
-	forge test --offline --debug --match-contract LISATest --match-test '^test_Deploy\(\)$$'
+	forge test --offline --debug --match-contract LISATest --match-test '^test_Program\(\)$$'
 
 trace: build
-	forge test --offline --match-contract LISATest --match-test '^test_Deploy\(\)$$' -vvvvv
+	forge test --offline --match-contract LISATest --match-test '^test_Program\(\)$$' -vvvvv
 
 snapshot: build
 	forge snapshot --offline

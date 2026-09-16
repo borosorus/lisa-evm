@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 contract LISATest is Test {
     address internal target;
+    uint internal a = 0;
 
     function setUp() public {
         bytes memory init = vm.parseBytes(vm.readFile("build/yul/LISA.bin"));
@@ -27,8 +28,19 @@ contract LISATest is Test {
         assertEq(result.length, 0);
     }
     function test_Program() public {
-        (bool ok, bytes memory result) = target.call("");
+        bytes memory dt = abi.encodePacked(
+            bytes1(0x20),uint256(uint160(address(this))), //push32 target
+            bytes1(0x20),uint(0), //push32 value
+            bytes1(0x32),uint(32),LISATest.incA.selector,bytes28(0), //blob 32 bytes with incA selector
+            bytes1(0x34) //call
+        );
+        (bool ok, bytes memory result) = target.call(dt);
+
         assertTrue(ok);
         assertEq(result.length, 0);
+        assertEq(a,1);
+    }
+    function incA() external {
+        a++;
     }
 }
