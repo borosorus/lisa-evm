@@ -26,4 +26,9 @@ contract LISATest is Test {
         assertTrue(ok);
         assertEq(result.length, 0);
     }
+    function test_Program() public {
+        (bool ok, bytes memory result) = target.call("");
+        assertTrue(ok);
+        assertEq(result.length, 0);
+    }
 }

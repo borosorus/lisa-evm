@@ -62,7 +62,9 @@ object "LISA" {
     */
     object "runtime" {
         code {
-            //TODO init mem and stack pointers
+            mstore(0x00, STACK_BASE())
+            mstore(0x20, MEM_BASE())
+            mstore(0x40, 0x60)
 
             // We'll make it expensive V0 for simplicity, just read the whole word each time, shift it, obtain opcode, execute and move pc
             let size := calldatasize()
