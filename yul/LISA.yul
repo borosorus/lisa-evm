@@ -51,9 +51,9 @@ object "LISA" {
                     JZ rel16	    pop condition; jump if zero                         0x31
         Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x32
                     MSTORE	        [offset,value] → []                                 0x33
-        Calls	    CALL	        [target,value,offset,len] → [success]               0x34
-                    STATICCALL	    [target,offset,len] → [success]                     0x35
-        Return data	RDLOAD	        [offset] → [word]                                   0x36
+        Calls	    CALL	        [target,value,offset,len] → [rdsize, success]       0x34
+                    STATICCALL	    [target,offset,len] → [rdsize, success]             0x35
+        Return data	RDLOAD	        [offset] → [word]                                   0x36                                 
         Context	    SELF	        [] → [wallet address]                               0x37
         Halt	    STOP	        success                                             0x00
                     REVERT	        revert                                              0x38
@@ -87,7 +87,7 @@ object "LISA" {
                 instr := shr(248,word)
             }
             function execute(instr, pc_) -> new_pc {
-                if iszero(instr) {return(0,0)} //STOP
+                if iszero(instr) {stop()} //STOP
                 // PUSH bytes
                 if lt(instr, 0x21) {
                     new_pc := push_(instr, pc_)
@@ -133,7 +133,22 @@ object "LISA" {
                 case 0x33 {
                     new_pc := mstore_(pc_)
                 }
-                default {}
+                case 0x34 {
+                    new_pc := call_(pc_)
+                }
+                case 0x35 {
+                    new_pc := staticcall_(pc_)
+                }
+                case 0x36 {
+                    new_pc := rdload_(pc_)
+                }
+                case 0x37 {
+                    new_pc := self_(pc_)
+                }
+                case 0x38 {
+                    stop()
+                }
+                default {invalid()}
             }
             function push_(size_, pc_) -> new_pc {
                 let value := calldataload(add(pc_, 1)) // value is at pc_ (instr) + 1 (byte)
@@ -145,7 +160,7 @@ object "LISA" {
             function push_to_stack(value) {
                 let _new_stack := add(mload(0x00), 0x20)
                 if eq(_new_stack, MEM_BASE()) {
-                    revert(0,0) // stack has overgrown
+                    invalid() // stack has overgrown
                 }
                 mstore(_new_stack, value)
                 mstore(0x00, _new_stack)
@@ -166,10 +181,10 @@ object "LISA" {
 
             function dup_(pc_) -> new_pc {
                 let n := parse_instr_at(add(pc_,1)) // DUP n
-                if iszero(n) {revert(0,0)}
+                if iszero(n) {invalid()}
                 let _stack := mload(0x00)
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
-                if gt(n,stack_size) {revert(0,0)}
+                if gt(n,stack_size) {invalid()}
                 let value := mload(sub(_stack, mul(sub(n,1),0x20)))
                 push_to_stack(value)
                 new_pc := add(pc_,2) // instr and n
@@ -177,10 +192,10 @@ object "LISA" {
 
             function swap_(pc_) -> new_pc {
                 let n := parse_instr_at(add(pc_,1)) // SWAP n
-                if iszero(n) {revert(0,0)}
+                if iszero(n) {invalid()}
                 let _stack := mload(0x00)
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
-                if gt(n,stack_size) {revert(0,0)}
+                if gt(n,stack_size) {invalid()}
                 let _stack_n := sub(_stack, mul(sub(n,1),0x20))
 
                 let value_n := mload(_stack_n)
@@ -279,6 +294,40 @@ object "LISA" {
                 let value := pop_from_stack()
                 let offset := pop_from_stack()
                 mstore(add(offset, MEM_BASE()), value) //STORING USING VIRTUAL OFFSET
+            }
+
+            function call_(pc_) -> new_pc {
+                let target := pop_from_stack()
+                let value := pop_from_stack()
+                let offset := pop_from_stack()
+                let len := pop_from_stack()
+                let success := call(gas(),target,value,offset,len,0,0)
+                push_to_stack(returndatasize())
+                push_to_stack(success)
+                new_pc := add(pc_,1)
+            }
+            function staticcall_(pc_) -> new_pc {
+                let target := pop_from_stack()
+                let offset := pop_from_stack()
+                let len := pop_from_stack()
+                let success := staticcall(gas(),target,offset,len,0,0)
+                push_to_stack(returndatasize())
+                push_to_stack(success)
+                new_pc := add(pc_,1)
+            }
+            function rdload_(pc_) -> new_pc {
+                let offset := pop_from_stack()
+                let _free_mem := mload(0x40) //TODO manage free mem
+
+                returndatacopy(_free_mem, offset, 0x20)
+                let value := mload(_free_mem)
+                push_to_stack(value)
+                new_pc := add(pc_,1)
+            }
+
+            function self_(pc_) -> new_pc {
+                push_to_stack(address())
+                new_pc := add(pc_,1)
             }
         }
     }
