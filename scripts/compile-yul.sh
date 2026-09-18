@@ -5,10 +5,18 @@ compiler="$1"
 shift
 output=$("$compiler" --strict-assembly --evm-version cancun "$@" --bin yul/LISA.yul)
 bytecode=$(printf '%s\n' "$output" | awk '/^Binary representation:$/ { getline; print; exit }')
+
+output1=$("$compiler" --strict-assembly --evm-version cancun "$@" --bin yul/tito.yul)
+bytecode1=$(printf '%s\n' "$output1" | awk '/^Binary representation:$/ { getline; print; exit }')
 if [[ ! "$bytecode" =~ ^([0-9a-fA-F]{2})+$ ]]; then
     printf 'Could not extract LISA creation bytecode from solc output.\n' >&2
+    exit 1
+fi
+if [[ ! "$bytecode1" =~ ^([0-9a-fA-F]{2})+$ ]]; then
+    printf 'Could not extract tito creation bytecode from solc output.\n' >&2
     exit 1
 fi
 
 mkdir -p build/yul
 printf '0x%s' "$bytecode" > build/yul/LISA.bin
+printf '0x%s' "$bytecode1" > build/yul/tito.bin

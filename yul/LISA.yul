@@ -1,3 +1,13 @@
+/*
+    IDEAS to improve
+
+    Could use real stack
+    Could have only push32
+    (reading whole word anyway from calldata)
+    safety not soo much of an issue
+    improve opcode (calldata) consuming mechanism, not to read calldata 600 times
+*/
+
 object "LISA" {
     code {
         datacopy(0, dataoffset("runtime"), datasize("runtime"))

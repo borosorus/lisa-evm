@@ -13,6 +13,9 @@ test: build
 
 debug: build
 	forge test --offline --debug --match-contract LISATest --match-test '^test_Program\(\)$$'
+	
+debug-tito: build
+	forge test --offline --debug --match-contract titoTest --match-test '^test_EmptyProgram\(\)$$'
 
 trace: build
 	forge test --offline --match-contract LISATest --match-test '^test_Program\(\)$$' -vvvvv
