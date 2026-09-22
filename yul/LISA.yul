@@ -1,9 +1,3 @@
-/*
-    IDEAS to improve
-
-    Could use real stack
-*/
-
 object "LISA" {
     code {
         datacopy(0, dataoffset("runtime"), datasize("runtime"))
@@ -13,7 +7,6 @@ object "LISA" {
         An INSTRUCTION (OPCODE) is 1 byte (8 bits)
         STACK grows upwards
 
-        Need a memory layout here
         0x00 -> current vm stack -> current is USEd
         0x20 -> free vm mem -> FREE ISN'T USED
         0x40 -> empty stack
@@ -49,16 +42,16 @@ object "LISA" {
                     DIV	            [a,b] → [a/b]                                       0x27
         Compare	    LT	            [a,b] → [a<b]                                       0x28
                     EQ	            [a,b] → [a==b]                                      0x29
-        Control	    JMP rel16	    relative jump                                       0x30
-                    JZ rel16	    pop condition; jump if zero                         0x31
-        Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x32
-                    MSTORE	        [offset,value] → []                                 0x33
-        Calls	    CALL	        [target,value,offset,len] → [rdsize, success]       0x34
-                    STATICCALL	    [target,offset,len] → [rdsize, success]             0x35
-        Return data	RDLOAD	        [offset] → [word]                                   0x36                                 
-        Context	    SELF	        [] → [wallet address]                               0x37
+        Control	    JMP rel16	    relative jump                                       0x2a
+                    JZ rel16	    pop condition; jump if zero                         0x2b
+        Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x2c
+                    MSTORE	        [offset,value] → []                                 0x2d
+        Calls	    CALL	        [target,value,offset,len] → [rdsize, success]       0x2e
+                    STATICCALL	    [target,offset,len] → [rdsize, success]             0x2f
+        Return data	RDLOAD	        [offset] → [word]                                   0x30                                 
+        Context	    SELF	        [] → [wallet address]                               0x31
         Halt	    STOP	        success                                             0x00
-                    REVERT	        revert                                              0x38
+                    REVERT	        revert                                              0x32
 
 
     */
@@ -95,15 +88,12 @@ object "LISA" {
                 pc_ := add(pc_, 1)
             }
 
-            // *** PC MANIP ****
             function read_instr(word) -> instr {
                 instr := shr(248, word)
             }
 
-            // *** END PC MANIP ****
-
             function execute(instr, pc_) -> new_pc {
-                if gt(instr, 0x38) {invalid()}
+                if gt(instr, 0x32) {invalid()}
                 if iszero(instr) {stop()} //STOP
                 new_pc := pc_
 
@@ -137,32 +127,32 @@ object "LISA" {
                 case 0x29 {
                     eq_()
                 }
-                case 0x30 {
+                case 0x2a {
                     new_pc := jmp_(pc_)
                 }
-                case 0x31 {
+                case 0x2b {
                     new_pc := jz_(pc_)
                 }
-                case 0x32 {
+                case 0x2c {
                     new_pc := blob_(pc_)
                 }
-                case 0x33 {
+                case 0x2d {
                     mstore_()
                 }
-                case 0x34 {
+                case 0x2e {
                     call_()
                 }
-                case 0x35 {
+                case 0x2f {
                     staticcall_()
                 }
-                case 0x36 {
+                case 0x30 {
                     rdload_()
                 }
-                case 0x37 {
+                case 0x31 {
                     self_()
                 }
-                case 0x38 {
-                    stop()
+                case 0x32 {
+                    revert(0,0)
                 }
                 default {
                     // PUSH bytes
@@ -203,6 +193,7 @@ object "LISA" {
                 if iszero(n) {invalid()}
 
                 let _stack := mload(0x00)
+                if lt(_stack, STACK_BASE()) { invalid() }
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
                 if gt(n,stack_size) {invalid()}
                 let value := mload(sub(_stack, mul(sub(n,1),0x20)))
@@ -216,6 +207,7 @@ object "LISA" {
                 if iszero(n) {invalid()}
 
                 let _stack := mload(0x00)
+                if lt(_stack, STACK_BASE()) { invalid() }
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
                 if gt(n,stack_size) {invalid()}
                 let _stack_n := sub(_stack, mul(sub(n,1),0x20))
@@ -228,28 +220,28 @@ object "LISA" {
             }
 
             function add_() {
-                let a := pop_from_stack()
                 let b := pop_from_stack()
+                let a := pop_from_stack()
                 push_to_stack(add(a,b))
             }
             function sub_()  {
-                let a := pop_from_stack()
                 let b := pop_from_stack()
+                let a := pop_from_stack()
                 push_to_stack(sub(a,b))
             }
             function mul_() {
-                let a := pop_from_stack()
                 let b := pop_from_stack()
+                let a := pop_from_stack()
                 push_to_stack(mul(a,b))
             }
             function div_() {
-                let a := pop_from_stack()
                 let b := pop_from_stack()
+                let a := pop_from_stack()
                 push_to_stack(div(a,b))
             }
             function lt_() {
-                let a := pop_from_stack()
                 let b := pop_from_stack()
+                let a := pop_from_stack()
                 push_to_stack(lt(a,b))
             }
             function eq_() {
@@ -280,7 +272,7 @@ object "LISA" {
 
             // sign-magnitude add (16 bits)
             function add_signed16(uint256, sint16) -> res {
-                sint16 := shr(240,shl(240,sint16))
+                sint16 := shr(240, shl(240,sint16))
                 let sign := shr(15,sint16)
                 switch sign
                 case 0 {res := add(uint256,sint16)}
@@ -288,25 +280,17 @@ object "LISA" {
             }
 
             function blob_(pc_) -> new_pc {
-                let len := calldataload(pc_)
-
-                pc_ := add(pc_, 0x20)
+                let len := shr(240, calldataload(pc_))
+                pc_ := add(pc_, 0x2)
 
                 let _mem_offset := mload(0x20)
+                calldatacopy(_mem_offset, pc_, len)
 
-                let _mem := _mem_offset
-                for { let i := 0 } lt(i, len) { i := add(i, 0x20) }
-                {
-                    let value := calldataload(pc_)
-                    mstore(_mem, value)
-                    _mem := add(_mem,0x20)
-                    pc_ := add(pc_,0x20)
-                }
                 push_to_stack(sub(_mem_offset, MEM_BASE())) // PUSHING VIRTUAL OFFSET 
                 push_to_stack(len)
 
-                mstore(0x20, _mem)
-                new_pc := pc_
+                mstore(0x20, add(_mem_offset, len))
+                new_pc := add(pc_, len)
             }
 
             function mstore_() {
@@ -335,6 +319,7 @@ object "LISA" {
 
             function rdload_() {
                 let _stack := mload(0x00)
+                if eq(_stack, 0x40) {invalid()}
                 let offset := mload(_stack)
 
                 returndatacopy(_stack, offset, 0x20) //copy rd to same stack slot
