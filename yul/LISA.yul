@@ -195,22 +195,22 @@ object "LISA" {
                     new_pc := jz_(pc_)
                 }
                 case 0x32 {
-                    new_pc := blob_(pc_)
+                    new_pc, new_word := blob_(pc_, word)
                 }
                 case 0x33 {
-                    new_pc := mstore_(pc_)
+                    mstore_()
                 }
                 case 0x34 {
-                    new_pc := call_(pc_)
+                    call_()
                 }
                 case 0x35 {
-                    new_pc := staticcall_(pc_)
+                    staticcall_()
                 }
                 case 0x36 {
-                    new_pc := rdload_(pc_)
+                    rdload_()
                 }
                 case 0x37 {
-                    new_pc := self_(pc_)
+                    self_()
                 }
                 case 0x38 {
                     stop()
@@ -368,9 +368,20 @@ object "LISA" {
                 case 1 {res := sub(uint256,sint16)}
             }
 
-            function blob_(pc_) -> new_pc {
-                let len := calldataload(add(pc_,1)) // len in bytes, must be div by 32
-                pc_ := add(pc_,33) // instr and len
+            function blob_(pc_, word) -> new_pc, new_word {
+                let mod_pc := mod(pc_, 0x20)
+                let len := 0
+
+                switch mod_pc 
+                case 0 {
+                    len := word
+                } 
+                default {
+                    // let's simplify here
+                    len := calldataload(pc_)
+                }
+                pc_ := add(pc_, 0x20)
+
                 let _mem_offset := mload(0x20)
 
                 let _mem := _mem_offset
@@ -385,16 +396,18 @@ object "LISA" {
                 push_to_stack(len)
 
                 mstore(0x20, _mem)
+
+                new_word := calldataload(mul(div(pc_, 0x20), 0x20))
                 new_pc := pc_
             }
 
-            function mstore_(pc_) -> new_pc {
+            function mstore_() {
                 let value := pop_from_stack()
                 let offset := pop_from_stack()
                 mstore(add(offset, MEM_BASE()), value) //STORING USING VIRTUAL OFFSET
             }
 
-            function call_(pc_) -> new_pc {
+            function call_() {
                 let len := pop_from_stack()
                 let offset := pop_from_stack()
                 let value := pop_from_stack()
@@ -402,30 +415,27 @@ object "LISA" {
                 let success := call(gas(),target,value,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
                 push_to_stack(returndatasize())
                 push_to_stack(success)
-                new_pc := add(pc_,1)
             }
-            function staticcall_(pc_) -> new_pc {
+            function staticcall_() {
                 let len := pop_from_stack()
                 let offset := pop_from_stack()
                 let target := pop_from_stack()
                 let success := staticcall(gas(),target,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
                 push_to_stack(returndatasize())
                 push_to_stack(success)
-                new_pc := add(pc_,1)
             }
-            function rdload_(pc_) -> new_pc {
+
+            function rdload_() {
                 let offset := pop_from_stack()
                 let _free_mem := mload(0x40) //TODO manage free mem
 
                 returndatacopy(_free_mem, offset, 0x20)
                 let value := mload(_free_mem)
                 push_to_stack(value)
-                new_pc := add(pc_,1)
             }
 
-            function self_(pc_) -> new_pc {
+            function self_() {
                 push_to_stack(address())
-                new_pc := add(pc_,1)
             }
         }
     }
