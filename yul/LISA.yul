@@ -79,53 +79,26 @@ object "LISA" {
             mstore(0x00, 0x40)
             mstore(0x20, MEM_BASE())
 
-            //let size := calldatasize()
-
-            //let word := calldataload(0)
-            //let instr := 0
-            //instr := read_instr(word, 0)
+            let size := calldatasize()
+            let sizeLimit := add(size, 1)
 
             // we start at one byte, first instr has already been read
 
             for { 
-                let size := calldatasize()
-                let sizeLimit := add(size, 1)
-                let word := calldataload(0)
                 let instr := 0
-                instr := read_instr(word, 0)
+                instr := read_instr(calldataload(0))
                 let pc_ := 0x1
-
             } lt(pc_, sizeLimit) {}
             {
-                word, pc_ := execute(instr, word, pc_)
+                pc_ := execute(instr, pc_)
 
-                let pc_offset := mul(div(pc_, 0x20), 0x20)
-
-                let mod_pc := mod(pc_, 0x20)
-
-                switch mod_pc
-                case 0 {
-                    // we consumed exactly what was left in the word
-                    word := calldataload(pc_offset)
-                    instr := read_instr(word, 0)
-                }
-                case 0x19 {
-                    // only next instruction left to consume, have to load next word
-                    instr := read_instr(word, 0x19)
-                    word := calldataload(add(pc_offset, 0x20))
-                }
-                default {
-                    // more than a byte left to consume
-                    instr := read_instr(word, mod_pc)                    
-                }
+                instr := read_instr(calldataload(pc_))                    
                 pc_ := add(pc_, 1)
             }
 
-                
-
             // *** PC MANIP ****
-            function read_instr(word, mod_pc) -> instr {
-                instr := shr(248, shl(mul(mod_pc, 8), word))
+            function read_instr(word) -> instr {
+                instr := shr(248, word)
             }
 
             // moving locally in existing word.
@@ -137,7 +110,7 @@ object "LISA" {
 
             // *** END PC MANIP ****
 
-            function execute(instr, word, pc_) -> new_word, new_pc {
+            function execute(instr, pc_) -> new_pc {
                 if gt(instr, 0x38) {invalid()}
                 if iszero(instr) {stop()} //STOP
                 new_pc := pc_
@@ -147,13 +120,11 @@ object "LISA" {
                     pop_()
                 }
                 case 0x22 {
-                    word := move_word_by(word, mod(pc_, 0x20))
-                    dup_(word)
+                    dup_(pc_)
                     new_pc := add(pc_, 1) // n
                 }
                 case 0x23 {
-                    word := move_word_by(word, mod(pc_, 0x20))
-                    swap_(word)
+                    swap_(pc_)
                     new_pc := add(pc_, 1) // n
                 }
                 case 0x24 {
@@ -175,13 +146,13 @@ object "LISA" {
                     eq_()
                 }
                 case 0x30 {
-                    new_pc, new_word := jmp_(pc_, word)
+                    new_pc := jmp_(pc_)
                 }
                 case 0x31 {
-                    new_pc, new_word := jz_(pc_, word)
+                    new_pc := jz_(pc_)
                 }
                 case 0x32 {
-                    new_pc, new_word := blob_(pc_, word)
+                    new_pc := blob_(pc_)
                 }
                 case 0x33 {
                     mstore_()
@@ -203,24 +174,12 @@ object "LISA" {
                 }
                 default {
                     // PUSH bytes
-                    new_word := push_(instr, word, pc_)
+                    push_(instr, pc_)
                     new_pc := add(pc_, instr)
                 }
             }
-            function push_(size_, word, pc_) -> new_word {
-                new_word := word
-                let mod_pc := mod(pc_, 0x20)
-
-                word := move_word_by(word, mod_pc)
-
-                if gt(add(mod_pc, size_), 0x20) {
-                    // new_word is the next offset calldata (pc_offset + 0x20)
-                    let next_pc_offset := add(sub(pc_, mod_pc), 0x20)
-                    new_word := calldataload(next_pc_offset)
-
-                    word := or(word, shr(mul(sub(0x20, mod_pc),8),new_word)) // word now contains the immediate data for push
-                }
-
+            function push_(size_, pc_) {
+                let word := calldataload(pc_)
                 let value := shr(sub(256, mul(size_,8)), word)
                 push_to_stack(value)
             }
@@ -245,7 +204,8 @@ object "LISA" {
                 mstore(0x00, sub(_stack,0x20))
             }
 
-            function dup_(word) {
+            function dup_(pc_) {
+                let word := calldataload(pc_)
                 let n := shr(248, word)
 
                 if iszero(n) {invalid()}
@@ -257,7 +217,8 @@ object "LISA" {
                 push_to_stack(value)
             }
 
-            function swap_(word) {
+            function swap_(pc_) {
+                let word := calldataload(pc_)
                 let n := shr(248, word)
 
                 if iszero(n) {invalid()}
@@ -306,39 +267,22 @@ object "LISA" {
             }
 
             // REL FROM PC_
-            function jmp_(pc_, word) -> new_pc, new_word {
-                new_word := word
+            function jmp_(pc_) -> new_pc {
+                let word := calldataload(pc_)
 
-                let mod_pc := mod(pc_, 0x20)
-                if eq(mod_pc, 0x19) {
-                    new_word := calldataload(add(pc_, 1))
-                    word := or(word, shr(8, new_word))
-                }
                 let sint16 := shr(240,word)
                 new_pc := add_signed16(pc_, sint16)
-
-                let current_offset := sub(pc_, mod_pc)
-                let next_offset := div(new_pc, 0x20)
-
-                if iszero(eq(current_offset, next_offset)) {
-                    new_word := calldataload(next_offset)
-                }
             }
 
-            function jz_(pc_, word) -> new_pc, new_word {
+            function jz_(pc_) -> new_pc {
                 let value := pop_from_stack()
 
                 switch value
                 case 0 {
-                    new_pc, new_word := jmp_(pc_, word)
+                    new_pc := jmp_(pc_)
                 }
                 default {
-                    new_word := word
-                    let mod_pc := mod(pc_, 0x20)
-                    if eq(mod_pc, 0x19) {
-                        new_word := calldataload(add(pc_, 1))
-                    }
-                    new_pc := add(pc_, 2)
+                    new_pc := add(pc_, 2) //signed16
                 }
             }
 
@@ -351,18 +295,9 @@ object "LISA" {
                 case 1 {res := sub(uint256,sint16)}
             }
 
-            function blob_(pc_, word) -> new_pc, new_word {
-                let mod_pc := mod(pc_, 0x20)
-                let len := 0
+            function blob_(pc_) -> new_pc {
+                let len := calldataload(pc_)
 
-                switch mod_pc 
-                case 0 {
-                    len := word
-                } 
-                default {
-                    // let's simplify here
-                    len := calldataload(pc_)
-                }
                 pc_ := add(pc_, 0x20)
 
                 let _mem_offset := mload(0x20)
@@ -379,8 +314,6 @@ object "LISA" {
                 push_to_stack(len)
 
                 mstore(0x20, _mem)
-
-                new_word := calldataload(mul(div(pc_, 0x20), 0x20))
                 new_pc := pc_
             }
 
