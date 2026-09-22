@@ -90,40 +90,36 @@ object "LISA" {
 
             let size := calldatasize()
 
-            let word := calldataload(pc_offset)
-            let pc_offset := 0
+            let word := calldataload(0)
             let instr := 0
             instr, word := read_instr(word)
             // we start at one byte, first instr has already been read
 
-            for { let rel_pc := 0x1 } lt(pc_offset, size) {} 
+            for { let pc_ := 0x1 } lt(pc_, size) {} 
             {
-                word, rel_pc := execute(instr, word, rel_pc, pc_offset)
+                word, pc_ := execute(instr, word, pc_)
 
-                pc_offset := add(pc_offset, div(rel_pc, 0x20))
+                let pc_offset := mul(div(pc_, 0x20), 0x20)
 
-                let mod_rel_pc := mod(rel_pc, 0x20)
+                let mod_pc := mod(pc_, 0x20)
 
-                switch mod_rel_pc
+                switch mod_pc
                 case 0 {
                     // we consumed exactly what was left in the word
                     word := calldataload(pc_offset)
                     instr, word := read_instr(word)
-                    rel_pc := 0x1
                 }
                 case 0x19 {
                     // only next instruction left to consume, have to load next word
                     instr := shr(248, word)
-                    pc_offset := add(pc_offset, 0x20)
-                    rel_pc := 0
-                    word := calldataload(pc_offset)
+                    word := calldataload(add(pc_offset, 0x20))
                 }
                 default {
                     // more than a byte left to consume
                     word := move_word_by(word, mod_rel_pc)
                     instr, word := read_instr(word)
-                    rel_pc := add(mod_rel_pc, 1)
                 }
+                pc_ := add(pc_, 1)
             }
 
                 
@@ -156,14 +152,14 @@ object "LISA" {
 
             // *** END PC MANIP ****
 
-            function execute(instr, word, rel_pc, pc_offset) -> word, new_rel_pc {
+            function execute(instr, word, pc_) -> word, new_pc {
                 if gt(instr, 0x38) {invalid()}
                 //TODO double check word stays word by default
                 if iszero(instr) {stop()} //STOP
                 switch instr
                 case 0x21 {
                     pop_()
-                    new_rel_pc := add(rel_pc, 1)
+                    new_pc := add(pc_, 1)
                 }
                 case 0x22 {
                     word, new_rel_pc := dup_(pc_)
@@ -218,18 +214,21 @@ object "LISA" {
                 }
                 default {
                     // PUSH bytes
-                    word := push_(instr, word, rel_pc, pc_offset)
-                    new_rel_pc := add(rel_pc, instr)
+                    word := push_(instr, word, pc_)
+                    new_pc := add(pc_, instr)
                 }
             }
-            function push_(size_, word, rel_pc, pc_offset) -> new_word {
+            function push_(size_, word, pc_) -> new_word {
                 new_word := word
+                mod_pc := mod(pc_, 0x20)
 
-                if gt(add(rel_pc, size_), 0x20) {
+                if gt(add(mod_pc, size_), 0x20) {
                     // new_word is the next offset calldata (pc_offset + 0x20)
-                    new_word, := fetch_move(rel_pc, pc_offset)
+                    next_pc_offset := add(sub(pc_, mod_pc), 0x20)
+                    new_word := calldataload(next_pc_offset)
+
                     // word now contains the immediate data for push
-                    word := and(word, shr(mul(rel_pc,8),new_word))
+                    word := and(word, shr(mul(mod_pc,8),new_word))
                 }
 
                 let value := shr(sub(256, mul(size_,8)), word)
