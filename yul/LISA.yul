@@ -79,15 +79,22 @@ object "LISA" {
             mstore(0x00, 0x40)
             mstore(0x20, MEM_BASE())
 
-            let size := calldatasize()
+            //let size := calldatasize()
 
-            let word := calldataload(0)
-            let instr := 0
-            instr := read_instr(word, 0)
+            //let word := calldataload(0)
+            //let instr := 0
+            //instr := read_instr(word, 0)
 
             // we start at one byte, first instr has already been read
 
-            for { let pc_ := 0x1 } lt(pc_, size) {} 
+            for { 
+                let size := calldatasize()
+                let word := calldataload(0)
+                let instr := 0
+                instr := read_instr(word, 0)
+                let pc_ := 0x1
+
+            } lt(pc_, size) {} 
             {
                 word, pc_ := execute(instr, word, pc_)
 
@@ -123,21 +130,8 @@ object "LISA" {
             // moving locally in existing word.
             // `by` is in bytes
             function move_word_by(word, by) -> new_word {
-                by_bits := mul(by, 8)
-                new_word := shl(by_bites, word)
-            }
-
-            // fetch next word, increase offset
-            // DOES NOT UPDATE REL_PC !! need to do manually
-            function next_word(pc_offset) -> word {
-                new_pc_offset := add(pc_offset, 0x20)
-                word := calldata(new_pc_offset)
-            }
-
-            // move pc to next word and fetch it
-            function fetch_move(rel_pc, pc_offset) -> new_word, new_rel_pc {
-                new_rel_pc := add(rel_pc, sub(0x20, mod(rel_pc, 0x20)))
-                new_word := next_word(pc_offset)
+                let by_bits := mul(by, 8)
+                new_word := shl(by_bits, word)
             }
 
             // *** END PC MANIP ****
@@ -180,10 +174,10 @@ object "LISA" {
                     eq_()
                 }
                 case 0x30 {
-                    new_pc := jmp_(pc_)
+                    new_pc, new_word := jmp_(pc_, word)
                 }
                 case 0x31 {
-                    new_pc := jz_(pc_)
+                    new_pc, new_word := jz_(pc_, word)
                 }
                 case 0x32 {
                     new_pc, new_word := blob_(pc_, word)
@@ -217,11 +211,11 @@ object "LISA" {
 
                 word := move_word_by(word, mod(pc_, 0x20))
 
-                mod_pc := mod(pc_, 0x20)
+                let mod_pc := mod(pc_, 0x20)
 
                 if gt(add(mod_pc, size_), 0x20) {
                     // new_word is the next offset calldata (pc_offset + 0x20)
-                    next_pc_offset := add(sub(pc_, mod_pc), 0x20)
+                    let next_pc_offset := add(sub(pc_, mod_pc), 0x20)
                     new_word := calldataload(next_pc_offset)
 
                     // word now contains the immediate data for push
@@ -417,7 +411,7 @@ object "LISA" {
 
             function rdload_() {
                 let _stack := mload(0x00)
-                offset := mload(_stack)
+                let offset := mload(_stack)
 
                 returndatacopy(_stack, offset, 0x20) //copy rd to same stack slot
             }
