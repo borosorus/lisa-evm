@@ -2,9 +2,6 @@
     IDEAS to improve
 
     Could use real stack
-    Could have only push32
-    (reading whole word anyway from calldata)
-    safety not soo much of an issue
     improve opcode (calldata) consuming mechanism, not to read calldata 600 times
 */
 
@@ -74,17 +71,6 @@ object "LISA" {
     */
     object "runtime" {
         code {
-            mstore(0x00, STACK_BASE())
-            mstore(0x20, MEM_BASE())
-            mstore(0x40, 0x60)
-
-            // We'll make it expensive V0 for simplicity, just read the whole word each time, shift it, obtain opcode, execute and move pc
-            let size := calldatasize()
-            for { let pc_ := 0 } lt(pc_, calldatasize()) {} {
-                let instr := parse_instr_at(pc_)
-                pc_ := execute(instr, pc_)
-            }
-
             function STACK_BASE() -> v {
                 v := 0x140
             }
@@ -96,23 +82,94 @@ object "LISA" {
                 v := add(STACK_BASE(),mul(0x20,STACK_SIZE()))
             }
 
-            function parse_instr_at(calldata_offset) -> instr {
-                let word := calldataload(calldata_offset)
-                instr := shr(248,word)
-            }
-            function execute(instr, pc_) -> new_pc {
-                if gt(instr, 0x38) {invalid()}
+            mstore(0x00, STACK_BASE())
+            mstore(0x20, MEM_BASE())
+            mstore(0x40, 0x60)
 
+            // OK NOW PC IS RELATIVE
+
+            let size := calldatasize()
+
+            let word := calldataload(pc_offset)
+            let pc_offset := 0
+            let instr := 0
+            instr, word := read_instr(word)
+            // we start at one byte, first instr has already been read
+
+            for { let rel_pc := 0x1 } lt(pc_offset, size) {} 
+            {
+                word, rel_pc := execute(instr, word, rel_pc, pc_offset)
+
+                pc_offset := add(pc_offset, div(rel_pc, 0x20))
+
+                let mod_rel_pc := mod(rel_pc, 0x20)
+
+                switch mod_rel_pc
+                case 0 {
+                    // we consumed exactly what was left in the word
+                    word := calldataload(pc_offset)
+                    instr, word := read_instr(word)
+                    rel_pc := 0x1
+                }
+                case 0x19 {
+                    // only next instruction left to consume, have to load next word
+                    instr := shr(248, word)
+                    pc_offset := add(pc_offset, 0x20)
+                    rel_pc := 0
+                    word := calldataload(pc_offset)
+                }
+                default {
+                    // more than a byte left to consume
+                    word := move_word_by(word, mod_rel_pc)
+                    instr, word := read_instr(word)
+                    rel_pc := add(mod_rel_pc, 1)
+                }
+            }
+
+                
+
+            // *** PC MANIP ****
+            function read_instr(word) -> instr, word {
+                instr := shr(248, word)
+                word := shl(8, word)
+            }
+
+            // moving locally in existing word.
+            // `by` is in bytes
+            function move_word_by(word, by) -> new_word {
+                by_bits := mul(by, 8)
+                new_word := shl(by_bites, word)
+            }
+
+            // fetch next word, increase offset
+            // DOES NOT UPDATE REL_PC !! need to do manually
+            function next_word(pc_offset) -> word {
+                new_pc_offset := add(pc_offset, 0x20)
+                word := calldata(new_pc_offset)
+            }
+
+            // move pc to next word and fetch it
+            function fetch_move(rel_pc, pc_offset) -> new_word, new_rel_pc {
+                new_rel_pc := add(rel_pc, sub(0x20, mod(rel_pc, 0x20)))
+                new_word := next_word(pc_offset)
+            }
+
+            // *** END PC MANIP ****
+
+            function execute(instr, word, rel_pc, pc_offset) -> word, new_rel_pc {
+                if gt(instr, 0x38) {invalid()}
+                //TODO double check word stays word by default
                 if iszero(instr) {stop()} //STOP
                 switch instr
                 case 0x21 {
-                    new_pc := pop_(pc_)
+                    pop_()
+                    new_rel_pc := add(rel_pc, 1)
                 }
                 case 0x22 {
-                    new_pc := dup_(pc_)
+                    word, new_rel_pc := dup_(pc_)
                 }
                 case 0x23 {
-                    new_pc := swap_(pc_)
+                    word, new_rel_pc := swap_(pc_)
                 }
                 case 0x24 {
                     new_pc := add_(pc_)
@@ -161,14 +218,23 @@ object "LISA" {
                 }
                 default {
                     // PUSH bytes
-                    new_pc := push_(instr, pc_)
+                    word := push_(instr, word, rel_pc, pc_offset)
+                    new_rel_pc := add(rel_pc, instr)
                 }
             }
-            function push_(size_, pc_) -> new_pc {
-                let value := calldataload(add(pc_, 1)) // value is at pc_ (instr) + 1 (byte)
-                value := shr(sub(256,mul(size_,8)), value) // truncating to recover only value (given size)
+            function push_(size_, word, rel_pc, pc_offset) -> new_word {
+                new_word := word
+
+                if gt(add(rel_pc, size_), 0x20) {
+                    // new_word is the next offset calldata (pc_offset + 0x20)
+                    new_word, := fetch_move(rel_pc, pc_offset)
+                    // word now contains the immediate data for push
+                    word := and(word, shr(mul(rel_pc,8),new_word))
+                }
+
+                let value := shr(sub(256, mul(size_,8)), word)
+
                 push_to_stack(value)
-                new_pc := add(pc_,add(1, size_))
             }
 
             function push_to_stack(value) {
@@ -180,9 +246,8 @@ object "LISA" {
                 mstore(0x00, _new_stack)
             }
 
-            function pop_(pc_) -> new_pc {
+            function pop_() {
                 pop(pop_from_stack())
-                new_pc := add(pc_,1)
             }
 
             function pop_from_stack() -> value {
