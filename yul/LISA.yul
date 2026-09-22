@@ -100,13 +100,6 @@ object "LISA" {
                 instr := shr(248, word)
             }
 
-            // moving locally in existing word.
-            // `by` is in bytes
-            function move_word_by(word, by) -> new_word {
-                let by_bits := mul(by, 8)
-                new_word := shl(by_bits, word)
-            }
-
             // *** END PC MANIP ****
 
             function execute(instr, pc_) -> new_pc {
