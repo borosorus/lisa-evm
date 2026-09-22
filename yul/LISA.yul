@@ -15,17 +15,17 @@ object "LISA" {
         STACK grows upwards
 
         Need a memory layout here
-        0x00 -> current vm stack -> CURRENT IS USEd
+        0x00 -> current vm stack -> current is USEd
         0x20 -> free vm mem -> FREE ISN'T USED
-        0x40 -> free our mem (maxxed out at X) ??
-        0x60 -> Start of our mem -
+        0x40 -> empty stack
+        0x60 -> start of vm stack STACK_BASE()
         0x80 -
         0xa0
         0xc0
         0xe0
-        0x100 -
-        0x120 -> up to here.
-        0x140 -> start of vm stack STACK_BASE()
+        0x100
+        0x120
+        0x140
         0x160
         0x180
         0x1a0
@@ -33,15 +33,9 @@ object "LISA" {
         0x1e0
         0x200
         0x220
-        0x240
-        0x260
+        0x240 -> end of vm stack (16 slots)
+        0x260 -> VM mem base MEM_BASE()
         0x280
-        0x2a0
-        0x2c0
-        0x2e0
-        0x300
-        0x320 -> end of vm stack (16 slots)
-        0x340 -> VM mem base MEM_BASE()
 
         --- ISA ----
         Group	    Instruction	    Stack effect / role                                 OPCODE
@@ -72,7 +66,7 @@ object "LISA" {
     object "runtime" {
         code {
             function STACK_BASE() -> v {
-                v := 0x140
+                v := 0x60
             }
             function STACK_SIZE() -> v {
                 v := 16
@@ -82,11 +76,8 @@ object "LISA" {
                 v := add(STACK_BASE(),mul(0x20,STACK_SIZE()))
             }
 
-            mstore(0x00, STACK_BASE())
+            mstore(0x00, 0x40)
             mstore(0x20, MEM_BASE())
-            mstore(0x40, 0x60)
-
-            // OK NOW PC IS RELATIVE
 
             let size := calldatasize()
 
@@ -242,7 +233,7 @@ object "LISA" {
             }
 
             function push_to_stack(value) {
-                let _new_stack := add(mload(0x00), 0x20) //TODO figure out start of stack
+                let _new_stack := add(mload(0x00), 0x20)
                 if eq(_new_stack, MEM_BASE()) {
                     invalid() // stack has overgrown
                 }
@@ -256,10 +247,9 @@ object "LISA" {
 
             function pop_from_stack() -> value {
                 let _stack := mload(0x00)
+                if lt(_stack, STACK_BASE()) {invalid()}
                 value := mload(_stack)
-                if not(eq(_stack,STACK_BASE())) {
-                    mstore(0x00, sub(_stack,0x20))
-                }
+                mstore(0x00, sub(_stack,0x20))
             }
 
             function dup_(word) {
@@ -426,12 +416,10 @@ object "LISA" {
             }
 
             function rdload_() {
-                let offset := pop_from_stack()
-                let _free_mem := mload(0x40) //TODO manage free mem
+                let _stack := mload(0x00)
+                offset := mload(_stack)
 
-                returndatacopy(_free_mem, offset, 0x20)
-                let value := mload(_free_mem)
-                push_to_stack(value)
+                returndatacopy(_stack, offset, 0x20) //copy rd to same stack slot
             }
 
             function self_() {
