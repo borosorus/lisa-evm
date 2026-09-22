@@ -2,7 +2,6 @@
     IDEAS to improve
 
     Could use real stack
-    improve opcode (calldata) consuming mechanism, not to read calldata 600 times
 */
 
 object "LISA" {
