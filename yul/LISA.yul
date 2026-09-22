@@ -273,16 +273,17 @@ object "LISA" {
             // sign-magnitude add (16 bits)
             function add_signed16(uint256, sint16) -> res {
                 sint16 := shr(240, shl(240,sint16))
-                let sign := shr(15,sint16)
+                let sign := shr(15, sint16)
+                let magnitude := and(sint16, 0x7fff)
+
                 switch sign
-                case 0 {res := add(uint256,sint16)}
-                case 1 {res := sub(uint256,sint16)}
+                case 0 { res := add(uint256, magnitude) }
+                case 1 { res := sub(uint256, magnitude) }
             }
 
             function blob_(pc_) -> new_pc {
                 let len := shr(240, calldataload(pc_))
                 pc_ := add(pc_, 0x2)
-
                 let _mem_offset := mload(0x20)
                 calldatacopy(_mem_offset, pc_, len)
 
