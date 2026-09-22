@@ -89,12 +89,13 @@ object "LISA" {
 
             for { 
                 let size := calldatasize()
+                let sizeLimit := add(size, 1)
                 let word := calldataload(0)
                 let instr := 0
                 instr := read_instr(word, 0)
                 let pc_ := 0x1
 
-            } lt(pc_, size) {} 
+            } lt(pc_, sizeLimit) {}
             {
                 word, pc_ := execute(instr, word, pc_)
 
@@ -208,18 +209,16 @@ object "LISA" {
             }
             function push_(size_, word, pc_) -> new_word {
                 new_word := word
-
-                word := move_word_by(word, mod(pc_, 0x20))
-
                 let mod_pc := mod(pc_, 0x20)
+
+                word := move_word_by(word, mod_pc)
 
                 if gt(add(mod_pc, size_), 0x20) {
                     // new_word is the next offset calldata (pc_offset + 0x20)
                     let next_pc_offset := add(sub(pc_, mod_pc), 0x20)
                     new_word := calldataload(next_pc_offset)
 
-                    // word now contains the immediate data for push
-                    word := and(word, shr(mul(mod_pc,8),new_word))
+                    word := or(word, shr(mul(sub(0x20, mod_pc),8),new_word)) // word now contains the immediate data for push
                 }
 
                 let value := shr(sub(256, mul(size_,8)), word)
@@ -313,7 +312,7 @@ object "LISA" {
                 let mod_pc := mod(pc_, 0x20)
                 if eq(mod_pc, 0x19) {
                     new_word := calldataload(add(pc_, 1))
-                    word := and(word, shr(8, new_word))
+                    word := or(word, shr(8, new_word))
                 }
                 let sint16 := shr(240,word)
                 new_pc := add_signed16(pc_, sint16)
