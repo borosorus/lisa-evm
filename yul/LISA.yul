@@ -92,7 +92,8 @@ object "LISA" {
 
             let word := calldataload(0)
             let instr := 0
-            instr, word := read_instr(word)
+            instr := read_instr(word, 0)
+
             // we start at one byte, first instr has already been read
 
             for { let pc_ := 0x1 } lt(pc_, size) {} 
@@ -107,17 +108,16 @@ object "LISA" {
                 case 0 {
                     // we consumed exactly what was left in the word
                     word := calldataload(pc_offset)
-                    instr, word := read_instr(word)
+                    instr := read_instr(word, 0)
                 }
                 case 0x19 {
                     // only next instruction left to consume, have to load next word
-                    instr := shr(248, word)
+                    instr := read_instr(word, 0x19)
                     word := calldataload(add(pc_offset, 0x20))
                 }
                 default {
                     // more than a byte left to consume
-                    word := move_word_by(word, mod_rel_pc)
-                    instr, word := read_instr(word)
+                    instr := read_instr(word, mod_pc)                    
                 }
                 pc_ := add(pc_, 1)
             }
@@ -125,9 +125,8 @@ object "LISA" {
                 
 
             // *** PC MANIP ****
-            function read_instr(word) -> instr, word {
-                instr := shr(248, word)
-                word := shl(8, word)
+            function read_instr(word, mod_pc) -> instr {
+                instr := shr(248, shl(mul(mod_pc, 8), word))
             }
 
             // moving locally in existing word.
@@ -152,46 +151,42 @@ object "LISA" {
 
             // *** END PC MANIP ****
 
-            function execute(instr, word, pc_) -> word, new_pc {
+            function execute(instr, word, pc_) -> new_word, new_pc {
                 if gt(instr, 0x38) {invalid()}
-                //TODO double check word stays word by default
                 if iszero(instr) {stop()} //STOP
+                new_pc := pc_
+
                 switch instr
                 case 0x21 {
                     pop_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x22 {
+                    word := move_word_by(word, mod(pc_, 0x20))
                     dup_(word)
-                    new_pc := add(pc_,2) // instr and n
+                    new_pc := add(pc_, 1) // n
                 }
                 case 0x23 {
+                    word := move_word_by(word, mod(pc_, 0x20))
                     swap_(word)
-                    new_pc := add(pc_,2) // instr and n
+                    new_pc := add(pc_, 1) // n
                 }
                 case 0x24 {
                     add_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x25 {
                     sub_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x26 {
                     mul_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x27 {
                     div_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x28 {
                     lt_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x29 {
                     eq_()
-                    new_pc := add(pc_, 1)
                 }
                 case 0x30 {
                     new_pc := jmp_(pc_)
@@ -222,12 +217,15 @@ object "LISA" {
                 }
                 default {
                     // PUSH bytes
-                    word := push_(instr, word, pc_)
+                    new_word := push_(instr, word, pc_)
                     new_pc := add(pc_, instr)
                 }
             }
             function push_(size_, word, pc_) -> new_word {
                 new_word := word
+
+                word := move_word_by(word, mod(pc_, 0x20))
+
                 mod_pc := mod(pc_, 0x20)
 
                 if gt(add(mod_pc, size_), 0x20) {
@@ -240,7 +238,6 @@ object "LISA" {
                 }
 
                 let value := shr(sub(256, mul(size_,8)), word)
-
                 push_to_stack(value)
             }
 
@@ -326,20 +323,39 @@ object "LISA" {
             }
 
             // REL FROM PC_
-            function jmp_(pc_) -> new_pc {
-                let sint16 := shr(240,calldataload(add(pc_,1)))
+            function jmp_(pc_, word) -> new_pc, new_word {
+                new_word := word
+
+                let mod_pc := mod(pc_, 0x20)
+                if eq(mod_pc, 0x19) {
+                    new_word := calldataload(add(pc_, 1))
+                    word := and(word, shr(8, new_word))
+                }
+                let sint16 := shr(240,word)
                 new_pc := add_signed16(pc_, sint16)
+
+                let current_offset := sub(pc_, mod_pc)
+                let next_offset := div(new_pc, 0x20)
+
+                if iszero(eq(current_offset, next_offset)) {
+                    new_word := calldataload(next_offset)
+                }
             }
 
-            function jz_(pc_) -> new_pc {
-                let sint16 := shr(240,calldataload(add(pc_,1)))
+            function jz_(pc_, word) -> new_pc, new_word {
                 let value := pop_from_stack()
+
                 switch value
                 case 0 {
-                    new_pc := add_signed16(pc_, sint16)
+                    new_pc, new_word := jmp_(pc_, word)
                 }
                 default {
-                    new_pc := add(pc_, 3) //instr and 16 bits signed
+                    new_word := word
+                    let mod_pc := mod(pc_, 0x20)
+                    if eq(mod_pc, 0x19) {
+                        new_word := calldataload(add(pc_, 1))
+                    }
+                    new_pc := add(pc_, 2)
                 }
             }
 
