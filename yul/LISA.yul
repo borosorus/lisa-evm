@@ -162,28 +162,36 @@ object "LISA" {
                     new_pc := add(pc_, 1)
                 }
                 case 0x22 {
-                    word, new_rel_pc := dup_(pc_)
+                    dup_(word)
+                    new_pc := add(pc_,2) // instr and n
                 }
                 case 0x23 {
-                    word, new_rel_pc := swap_(pc_)
+                    swap_(word)
+                    new_pc := add(pc_,2) // instr and n
                 }
                 case 0x24 {
-                    new_pc := add_(pc_)
+                    add_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x25 {
-                    new_pc := sub_(pc_)
+                    sub_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x26 {
-                    new_pc := mul_(pc_)
+                    mul_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x27 {
-                    new_pc := div_(pc_)
+                    div_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x28 {
-                    new_pc := lt_(pc_)
+                    lt_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x29 {
-                    new_pc := eq_(pc_)
+                    eq_()
+                    new_pc := add(pc_, 1)
                 }
                 case 0x30 {
                     new_pc := jmp_(pc_)
@@ -257,20 +265,23 @@ object "LISA" {
                 }
             }
 
-            function dup_(pc_) -> new_pc {
-                let n := parse_instr_at(add(pc_,1)) // DUP n
+            function dup_(word) {
+                let n := shr(248, word)
+
                 if iszero(n) {invalid()}
+
                 let _stack := mload(0x00)
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
                 if gt(n,stack_size) {invalid()}
                 let value := mload(sub(_stack, mul(sub(n,1),0x20)))
                 push_to_stack(value)
-                new_pc := add(pc_,2) // instr and n
             }
 
-            function swap_(pc_) -> new_pc {
-                let n := parse_instr_at(add(pc_,1)) // SWAP n
+            function swap_(word) {
+                let n := shr(248, word)
+
                 if iszero(n) {invalid()}
+
                 let _stack := mload(0x00)
                 let stack_size := add(div(sub(_stack, STACK_BASE()),0x20), 1)
                 if gt(n,stack_size) {invalid()}
@@ -281,44 +292,37 @@ object "LISA" {
 
                 mstore(_stack_n, value_t)
                 mstore(_stack, value_n)
-                new_pc := add(pc_,2) // instr and n
             }
 
-            function add_(pc_) -> new_pc {
+            function add_() {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(add(a,b))
-                new_pc := add(pc_,1)
             }
-            function sub_(pc_) -> new_pc {
+            function sub_()  {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(sub(a,b))
-                new_pc := add(pc_,1)
             }
-            function mul_(pc_) -> new_pc {
+            function mul_() {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(mul(a,b))
-                new_pc := add(pc_,1)
             }
-            function div_(pc_) -> new_pc {
+            function div_() {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(div(a,b))
-                new_pc := add(pc_,1)
             }
-            function lt_(pc_) -> new_pc {
+            function lt_() {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(lt(a,b))
-                new_pc := add(pc_,1)
             }
-            function eq_(pc_) -> new_pc {
+            function eq_() {
                 let a := pop_from_stack()
                 let b := pop_from_stack()
                 push_to_stack(eq(a,b))
-                new_pc := add(pc_,1)
             }
 
             // REL FROM PC_
