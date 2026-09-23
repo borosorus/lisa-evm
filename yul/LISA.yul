@@ -293,7 +293,7 @@ object "LISA" {
                 let word := calldataload(pc_)
 
                 let sint16 := shr(240,word)
-                new_pc := add_signed16(pc_, sint16)
+                new_pc := add_rel16(pc_, sint16)
             }
 
             function jz_(pc_) -> new_pc {
@@ -310,9 +310,9 @@ object "LISA" {
 
             // sign-magnitude add (16 bits)
             // rel16: bit 15 = backwards, bits 0..14 = magnitude
-            function add_signed16(uint256, sint16) -> res {
-                let sign := shr(15, sint16)
-                let magnitude := and(sint16, 0x7fff)
+            function add_rel16(uint256, rel16) -> res {
+                let sign := shr(15, rel16)
+                let magnitude := and(rel16, 0x7fff)
 
                 switch sign
                 case 0 { res := add(uint256, magnitude) }
