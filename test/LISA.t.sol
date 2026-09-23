@@ -28,6 +28,76 @@ contract LISATest is Test {
         assertEq(result.length, 0);
     }
 
+    function _assertInvalid(bytes memory program) internal {
+        (bool ok,) = target.call(program);
+        assertFalse(ok);
+    }
+
+    function test_InvalidOpcode() public {
+        _assertInvalid(hex"3a");
+    }
+
+    function test_StackUnderflow() public {
+        _assertInvalid(hex"21"); // POP
+    }
+
+    function test_StackOverflow() public {
+        bytes memory program;
+        for (uint256 i; i < 17; i++) {
+            program = bytes.concat(program, hex"0100"); // PUSH1 0
+        }
+        _assertInvalid(program);
+    }
+
+    function test_TruncatedPush() public {
+        _assertInvalid(hex"20"); // PUSH32 without its immediate
+    }
+
+    function test_JumpOutOfBounds() public {
+        _assertInvalid(hex"2b0004"); // JMP +4 from pc=1, beyond calldata
+    }
+
+    function test_MemoryOffsetWraparound() public {
+        bytes memory program = abi.encodePacked(
+            bytes1(0x20),
+            type(uint256).max - uint256(0x25f), // 2^256 - MEM_BASE
+            bytes1(0x2f)                       // MLOAD
+        );
+        _assertInvalid(program);
+    }
+
+    function test_RevertOpcode() public {
+        _assertInvalid(hex"39");
+    }
+
+    function test_Program_Division() public {
+        bytes memory program = bytes.concat(
+            abi.encodePacked(
+                bytes1(0x01), bytes1(0x08), // PUSH1 8
+                bytes1(0x01), bytes1(0x02), // PUSH1 2
+                bytes1(0x27)                // DIV -> 4
+            ),
+            _writeTopToA()
+        );
+
+        (bool ok,) = target.call(program);
+        assertTrue(ok);
+        assertEq(a, 4);
+
+        program = bytes.concat(
+            abi.encodePacked(
+                bytes1(0x01), bytes1(0x08), // PUSH1 8
+                bytes1(0x01), bytes1(0x00), // PUSH1 0
+                bytes1(0x27)                // DIV -> 0
+            ),
+            _writeTopToA()
+        );
+
+        (ok,) = target.call(program);
+        assertTrue(ok);
+        assertEq(a, 0);
+    }
+
     function incA() external {
         a++;
     }
