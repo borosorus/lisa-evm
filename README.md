@@ -25,6 +25,42 @@ STOP
 01 02 01 03 24 00
 ```
 
+## Instruction set
+
+The canonical implementation is in [`yul/LISA.yul`](yul/LISA.yul). Stack effects below are written from lower to higher stack position, with the rightmost value at the top of the stack.
+
+| Group | Opcode | Instruction | Stack effect / role |
+| --- | --- | --- | --- |
+| Halt | `0x00` | `STOP` | Successful termination |
+| Constants | `0x01-0x20` | `PUSHn <n bytes>` | `[] -> [x]`; the opcode value is the immediate byte length, from 1 to 32 |
+| Stack | `0x21` | `POP` | `[x] -> []` |
+| Stack | `0x22` | `DUP <n>` | Duplicate the nth stack item, where `n` is a one-byte immediate |
+| Stack | `0x23` | `SWAP <n>` | Swap the top with the nth stack item, where `n` is a one-byte immediate |
+| Math | `0x24` | `ADD` | `[a, b] -> [a + b]` |
+| Math | `0x25` | `SUB` | `[a, b] -> [a - b]` |
+| Math | `0x26` | `MUL` | `[a, b] -> [a * b]` |
+| Math | `0x27` | `DIV` | `[a, b] -> [a / b]`; division by zero yields zero |
+| Crypto | `0x28` | `KECCAK256` | `[offset, size] -> [hash]` over virtual memory |
+| Compare | `0x29` | `LT` | `[a, b] -> [a < b]` |
+| Compare | `0x2a` | `EQ` | `[a, b] -> [a == b]` |
+| Control | `0x2b` | `JMP <rel16>` | Relative jump using the 16-bit sign-magnitude encoding described above |
+| Control | `0x2c` | `JZ <rel16>` | `[condition] -> []`; jump when the condition is zero |
+| Memory | `0x2d` | `BLOB <len:u16> <data>` | Copy inline data to virtual memory and push `[offset, len]` |
+| Memory | `0x2e` | `MSTORE` | `[offset, value] -> []` |
+| Memory | `0x2f` | `MLOAD` | `[offset] -> [value]` |
+| Calls | `0x30` | `CALL` | `[target, value, offset, len] -> [rdsize, success]` |
+| Calls | `0x31` | `STATICCALL` | `[target, offset, len] -> [rdsize, success]` |
+| Return data | `0x32` | `RDLOAD` | `[offset] -> [word]`; load 32 bytes from the latest EVM returndata |
+| Context | `0x33` | `SELF` | `[] -> [address]`; current EVM execution address |
+| Context | `0x34` | `CALLER` | `[] -> [msg.sender]` |
+| Context | `0x35` | `GAS` | `[] -> [gas left]` |
+| Context | `0x36` | `SELFBALANCE` | `[] -> [current address balance]` |
+| Context | `0x37` | `BALANCE` | `[address] -> [balance]` |
+| Context | `0x38` | `TIMESTAMP` | `[] -> [block.timestamp]` |
+| Halt | `0x39` | `REVERT` | Revert execution |
+
+Opcodes above `0x39` are invalid. `PUSHn`, `DUP`, `SWAP`, `JMP`, `JZ`, and `BLOB` consume inline bytes from the program in addition to their opcode byte.
+
 ### Execution context
 
 Context opcodes reflect the EVM context in which the interpreter is running. In a standalone deployment, `SELF` is the LISA contract address. When the interpreter is reached through host-level `DELEGATECALL`, `SELF` is the host wallet address and `CALLER` remains the original caller.
