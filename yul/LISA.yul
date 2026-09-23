@@ -89,6 +89,7 @@ object "LISA" {
             } lt(pc_, sizeLimit) {}
             {
                 pc_ := execute(instr, pc_)
+                if gt(pc_, size) { invalid() }
 
                 instr := read_instr(calldataload(pc_))                    
                 pc_ := add(pc_, 1)
@@ -96,6 +97,10 @@ object "LISA" {
 
             function read_instr(word) -> instr {
                 instr := shr(248, word)
+            }
+            function vm_ptr(offset) -> ptr {
+                ptr := add(MEM_BASE(), offset)
+                if lt(ptr, MEM_BASE()) { invalid() }
             }
 
             function execute(instr, pc_) -> new_pc {
@@ -269,8 +274,8 @@ object "LISA" {
             }
             function keccak_() {
                 let size_ := pop_from_stack()
-                let offset := pop_from_stack()
-                push_to_stack(keccak256(add(MEM_BASE(), offset), size_))
+                let offset := vm_ptr(pop_from_stack())
+                push_to_stack(keccak256(offset, size_))
             }
             function lt_() {
                 let b := pop_from_stack()
@@ -304,8 +309,8 @@ object "LISA" {
             }
 
             // sign-magnitude add (16 bits)
+            // rel16: bit 15 = backwards, bits 0..14 = magnitude
             function add_signed16(uint256, sint16) -> res {
-                sint16 := shr(240, shl(240,sint16))
                 let sign := shr(15, sint16)
                 let magnitude := and(sint16, 0x7fff)
 
@@ -329,29 +334,29 @@ object "LISA" {
 
             function mstore_() {
                 let value := pop_from_stack()
-                let offset := pop_from_stack()
-                mstore(add(offset, MEM_BASE()), value) //STORING USING VIRTUAL OFFSET
+                let offset := vm_ptr(pop_from_stack())
+                mstore(offset, value)
             }
 
             function mload_() {
-                let offset := pop_from_stack()
-                push_to_stack(mload(add(offset, MEM_BASE()))) //READINg USING VIRTUAL OFFSET
+                let offset := vm_ptr(pop_from_stack())
+                push_to_stack(mload(offset))
             }
 
             function call_() {
                 let len := pop_from_stack()
-                let offset := pop_from_stack()
+                let offset := vm_ptr(pop_from_stack())
                 let value := pop_from_stack()
                 let target := pop_from_stack()
-                let success := call(gas(),target,value,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
+                let success := call(gas(),target,value,offset,len,0,0)
                 push_to_stack(returndatasize())
                 push_to_stack(success)
             }
             function staticcall_() {
                 let len := pop_from_stack()
-                let offset := pop_from_stack()
+                let offset := vm_ptr(pop_from_stack())
                 let target := pop_from_stack()
-                let success := staticcall(gas(),target,add(MEM_BASE(),offset),len,0,0) //VIRTUAL OFFSET
+                let success := staticcall(gas(),target,offset,len,0,0)
                 push_to_stack(returndatasize())
                 push_to_stack(success)
             }
