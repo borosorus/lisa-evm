@@ -40,19 +40,26 @@ object "LISA" {
                     SUB	            [a,b] → [a-b]                                       0x25
                     MUL	            [a,b] → [a*b]                                       0x26
                     DIV	            [a,b] → [a/b]                                       0x27
-        Compare	    LT	            [a,b] → [a<b]                                       0x28
-                    EQ	            [a,b] → [a==b]                                      0x29
-        Control	    JMP rel16	    relative jump                                       0x2a
-                    JZ rel16	    pop condition; jump if zero                         0x2b
-        Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x2c
-                    MSTORE	        [offset,value] → []                                 0x2d
-        Calls	    CALL	        [target,value,offset,len] → [rdsize, success]       0x2e
-                    STATICCALL	    [target,offset,len] → [rdsize, success]             0x2f
-        Return data	RDLOAD	        [offset] → [word]                                   0x30                                 
-        Context	    SELF	        [] → [wallet address]                               0x31
-        Halt	    STOP	        success                                             0x00
-                    REVERT	        revert                                              0x32
-
+                    KECCAK256       [offset, size] -> [hash]                            0x28
+        Compare	    LT	            [a,b] → [a<b]                                       0x29
+                    EQ	            [a,b] → [a==b]                                      0x2a
+        Control	    JMP rel16	    relative jump                                       0x2b
+                    JZ rel16	    pop condition; jump if zero                         0x2c
+        Memory	    BLOB len,data	copy inline data → scratch, push [offset,len]       0x2d
+                    MSTORE	        [offset,value] → []                                 0x2e
+                    MLOAD           [offset] -> [value]                                 0x2f
+        Calls	    CALL	        [target,value,offset,len] → [rdsize, success]       0x30
+                    STATICCALL	    [target,offset,len] → [rdsize, success]             0x31
+        Return data	RDLOAD	        [offset] → [word]                                   0x32                                 
+        Context	    SELF	        [] → [wallet address]                               0x33
+                    CALLER          [] -> [msg.sender]                                  0x34
+                    GAS             [] -> [gas left]                                    0x35
+                    SELFBALANCE     [] -> [self balance]                                0x36
+                    BALANCE         [address] -> [balance]                              0x37
+                    TIMESTAMP       [] -> [timestamp]                                   0x38
+        Halt	    
+                    REVERT	        revert                                              0x39
+                    STOP	        success                                             0x00
 
     */
     object "runtime" {
@@ -63,9 +70,8 @@ object "LISA" {
             function STACK_SIZE() -> v {
                 v := 16
             }
-
             function MEM_BASE() -> v {
-                v := add(STACK_BASE(),mul(0x20,STACK_SIZE()))
+                v := 0x260
             }
 
             mstore(0x00, 0x40)
@@ -93,8 +99,9 @@ object "LISA" {
             }
 
             function execute(instr, pc_) -> new_pc {
-                if gt(instr, 0x32) {invalid()}
-                if iszero(instr) {stop()} //STOP
+                if gt(instr, 0x39) {invalid()}
+                if iszero(instr) {stop()}
+
                 new_pc := pc_
 
                 switch instr
@@ -122,36 +129,57 @@ object "LISA" {
                     div_()
                 }
                 case 0x28 {
-                    lt_()
+                    keccak_()
                 }
                 case 0x29 {
-                    eq_()
+                    lt_()
                 }
                 case 0x2a {
-                    new_pc := jmp_(pc_)
+                    eq_()
                 }
                 case 0x2b {
-                    new_pc := jz_(pc_)
+                    new_pc := jmp_(pc_)
                 }
                 case 0x2c {
-                    new_pc := blob_(pc_)
+                    new_pc := jz_(pc_)
                 }
                 case 0x2d {
-                    mstore_()
+                    new_pc := blob_(pc_)
                 }
                 case 0x2e {
-                    call_()
+                    mstore_()
                 }
                 case 0x2f {
-                    staticcall_()
+                    mload_()
                 }
                 case 0x30 {
-                    rdload_()
+                    call_()
                 }
                 case 0x31 {
-                    self_()
+                    staticcall_()
                 }
                 case 0x32 {
+                    rdload_()
+                }
+                case 0x33 {
+                    self_()
+                }
+                case 0x34 {
+                    caller_()
+                }
+                case 0x35 {
+                    gas_()
+                }
+                case 0x36 {
+                    selfbalance_()
+                }
+                case 0x37 {
+                    balance_()
+                }
+                case 0x38 {
+                    timestamp_()
+                }
+                case 0x39 {
                     revert(0,0)
                 }
                 default {
@@ -239,6 +267,11 @@ object "LISA" {
                 let a := pop_from_stack()
                 push_to_stack(div(a,b))
             }
+            function keccak_() {
+                let size_ := pop_from_stack()
+                let offset := pop_from_stack()
+                push_to_stack(keccak256(offset, size_))
+            }
             function lt_() {
                 let b := pop_from_stack()
                 let a := pop_from_stack()
@@ -300,6 +333,11 @@ object "LISA" {
                 mstore(add(offset, MEM_BASE()), value) //STORING USING VIRTUAL OFFSET
             }
 
+            function mload_() {
+                let offset := pop_from_stack()
+                push_to_stack(mload(add(offset, MEM_BASE()))) //READINg USING VIRTUAL OFFSET
+            }
+
             function call_() {
                 let len := pop_from_stack()
                 let offset := pop_from_stack()
@@ -328,6 +366,27 @@ object "LISA" {
 
             function self_() {
                 push_to_stack(address())
+            }
+
+            function caller_() {
+                push_to_stack(caller())
+            }
+
+            function gas_() {
+                push_to_stack(gas())
+            }
+
+            function selfbalance_() {
+                push_to_stack(selfbalance())
+            }
+
+            function balance_() {
+                let target := pop_from_stack()
+                push_to_stack(balance(target))
+            }
+
+            function timestamp_() {
+                push_to_stack(timestamp())
             }
         }
     }

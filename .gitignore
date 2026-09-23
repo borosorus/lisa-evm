@@ -2,7 +2,8 @@
 cache/
 out/
 build/
-
+.DS_Store
+*/.DS_Store
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
