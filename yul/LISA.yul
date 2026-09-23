@@ -270,7 +270,7 @@ object "LISA" {
             function keccak_() {
                 let size_ := pop_from_stack()
                 let offset := pop_from_stack()
-                push_to_stack(keccak256(offset, size_))
+                push_to_stack(keccak256(add(MEM_BASE(), offset), size_))
             }
             function lt_() {
                 let b := pop_from_stack()
