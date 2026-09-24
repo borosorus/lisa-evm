@@ -38,6 +38,8 @@ import {
   sub,
   swap,
 } from '../src/api.ts';
+import { createProgram, encodeCall, CALLER, SELF } from '../src/index.ts';
+import { keccakAscii, keccakBytes } from '../src/keccak.ts';
 
 interface Fixture {
   name: string;
@@ -45,10 +47,18 @@ interface Fixture {
   expect: 'ok' | 'revert';
   /** When set, the Solidity harness writes the stack top to `a` and asserts it. */
   expectA?: bigint;
+  /** When set, the harness asserts its `recordedAmount` mock storage slot. */
+  expectRecorded?: bigint;
 }
 
 const fixtures: Fixture[] = [];
-function addFixture(name: string, body: Program, expect: 'ok' | 'revert', expectA?: bigint): void {
+function addFixture(
+  name: string,
+  body: Program,
+  expect: 'ok' | 'revert',
+  expectA?: bigint,
+  expectRecorded?: bigint,
+): void {
   // With expectA, the Foundry harness appends its own write-top-to-`a` tail
   // (ending in CALL+STOP), so the body must fall through into it; a trailing
   // STOP would end execution before the tail runs. Revert fixtures get no
@@ -62,7 +72,7 @@ function addFixture(name: string, body: Program, expect: 'ok' | 'revert', expect
   } catch (err) {
     if (expect !== 'revert') throw err;
   }
-  fixtures.push({ name, program: bytes, expect, expectA });
+  fixtures.push({ name, program: bytes, expect, expectA, expectRecorded });
 }
 
 // --- Math and stack ---------------------------------------------------------
@@ -191,12 +201,67 @@ addFixture('jmp_backward_underflow', program(raw('0x2bffff')), 'revert'); // -32
 addFixture('memory_offset_wrap', program(push(2n ** 256n - 0x260n), mload), 'revert');
 addFixture('revert_opcode', program(raw('0x39')), 'revert');
 
+// --- High-level TypeScript-first (builder) programs ----------------------------
+// These exercise the full stack: builder -> AST -> compiler -> bytes -> runtime.
+// They target CALLER (the harness contract), which exposes the mock functions
+// below; SELF reaches them as a RUNTIME ABI argument, so a wrong patch offset
+// or alignment makes the harness `require` fail and the wallet revert.
+
+function hlConditionalBalanceCall(limit: number): Program {
+  // LISAToolingTest.balanceOf returns 1500 and requires owner == wallet.
+  const p = createProgram();
+  const balance = p.staticCall(CALLER, encodeCall('balanceOf(address)', [SELF])).uint256();
+  p.if(balance.gt(limit), () => {
+    p.call(CALLER, encodeCall('execute(uint256)', [balance]));
+  });
+  return p.toAST();
+}
+
+addFixture('hl_balance_conditional_call', hlConditionalBalanceCall(1000), 'ok', 1500n, 1500n);
+addFixture('hl_branch_not_taken', hlConditionalBalanceCall(2000), 'ok', 1500n, 0n);
+
+addFixture(
+  'hl_failed_call_reverts',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, encodeCall('alwaysReverts()'));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+addFixture(
+  'hl_empty_return_decode_reverts',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, encodeCall('emptyReturn()')).uint256(); // RDLOAD beyond returndata
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// Cross-check: the toolchain's Keccak (ABI selectors) must equal the runtime's
+// KECCAK256 opcode, single-block and multi-block.
+addFixture(
+  'hl_keccak_single_block_matches_runtime',
+  program(blob(new TextEncoder().encode('transfer(address,uint256)')), keccak256),
+  'ok',
+  BigInt(`0x${hex(keccakAscii('transfer(address,uint256)'))}`),
+);
+addFixture(
+  'hl_keccak_multiblock_matches_runtime',
+  program(blob(new Uint8Array(200).fill(0xab)), keccak256),
+  'ok',
+  BigInt(`0x${hex(keccakBytes(new Uint8Array(200).fill(0xab)))}`),
+);
+
 // --- Emit ---------------------------------------------------------------------
 
 const rows = fixtures.map(
   (f) =>
     `    {"name": ${JSON.stringify(f.name)}, "program": "0x${hex(f.program)}", "expect": "${f.expect}"` +
     (f.expectA !== undefined ? `, "expectA": ${f.expectA.toString()}` : '') +
+    (f.expectRecorded !== undefined ? `, "expectRecorded": ${f.expectRecorded.toString()}` : '') +
     '}',
 );
 

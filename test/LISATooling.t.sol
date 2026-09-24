@@ -16,6 +16,10 @@ contract LISAToolingTest is Test {
     uint256 public a;
     uint256 public setACalls;
 
+    /// Returned by the balanceOf mock below; mirrors TEST_BALANCE in the TS generator.
+    uint256 public constant TEST_BALANCE = 1500;
+    uint256 public recordedAmount;
+
     function setUp() public {
         bytes memory init = vm.parseBytes(vm.readFile("build/yul/LISA.bin"));
         address deployed;
@@ -50,6 +54,7 @@ contract LISAToolingTest is Test {
 
             a = 0;
             setACalls = 0;
+            recordedAmount = 0;
             (bool ok,) = target.call{gas: 10_000_000}(program);
 
             if (keccak256(bytes(expect)) == keccak256("revert")) {
@@ -62,6 +67,13 @@ contract LISAToolingTest is Test {
                     assertEq(setACalls, 1, string.concat(name, ": write-back ran"));
                     assertEq(a, vm.parseJsonUint(json, string.concat(path, ".expectA")), name);
                 }
+                if (vm.keyExistsJson(json, string.concat(path, ".expectRecorded"))) {
+                    assertEq(
+                        recordedAmount,
+                        vm.parseJsonUint(json, string.concat(path, ".expectRecorded")),
+                        string.concat(name, ": execute() side effect")
+                    );
+                }
             }
         }
     }
@@ -70,6 +82,25 @@ contract LISAToolingTest is Test {
         setACalls++;
         a = value;
     }
+
+    // --- mocks called back into by high-level (builder) fixtures ---
+
+    /// Receives SELF as a runtime ABI argument; a wrong patch offset/alignment
+    /// makes this require fail, failing the calling fixture visibly.
+    function balanceOf(address owner) external view returns (uint256) {
+        require(owner == target, "balanceOf: owner is not the wallet");
+        return TEST_BALANCE;
+    }
+
+    function execute(uint256 amount) external {
+        recordedAmount = amount;
+    }
+
+    function alwaysReverts() external pure {
+        revert("always reverts");
+    }
+
+    function emptyReturn() external pure {}
 
     /// CALL setA(stackTop): PUSH20 this; PUSH1 0; BLOB setA(0); DUP2, +4, DUP6, MSTORE, CALL,
     /// then revert if the CALL failed (JZ pops the success flag), else pop return size and STOP.

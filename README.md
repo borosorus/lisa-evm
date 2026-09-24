@@ -79,15 +79,45 @@ If LISA is embedded in or delegated to by a smart wallet, the same principle app
 
 ## TypeScript toolchain
 
-The `ts/` directory contains the TypeScript toolchain around the runtime:
+The `ts/` directory contains the TypeScript toolchain around the runtime. It has two levels of API; both lower into the same AST, compiler, and encoder:
 
 ```text
-TypeScript API  ->  AST  ->  compiler (labels)  ->  encoder  ->  bytecode  ->  LISA.yul
+TypeScript-first API  ->  high-level representation  ->  AST  ->  compiler (labels)  ->  encoder  ->  bytecode  ->  LISA.yul
+createProgram, Values,        program(), push(),       (the builder emits plain
+encodeCall, p.if              add, ...                  AST nodes)
 ```
 
 The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
 
-Requires Node.js >= 23.6 (TypeScript is run directly; no build step, no runtime dependencies).
+Requires Node.js >= 23.6 (TypeScript is run directly; no build step). The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing.
+
+### TypeScript-first API
+
+`createProgram()` (`ts/src/builder.ts`, with `ts/src/expr.ts` and `ts/src/abi.ts`) writes programs in terms of values and calls instead of a manual stack. The builder maintains a shadow stack and resolves every `DUP`/`SWAP` itself:
+
+```ts
+import { createProgram, encodeCall, SELF } from './ts/src/index.ts';
+
+const p = createProgram();
+
+// STATICCALL with a runtime ABI argument: the SELF placeholder is patched
+// into the copied blob at its word offset, and the returned word is read
+// lazily (RDLOAD) when decoded as uint256().
+const balance = p.staticCall(SELF, encodeCall('balanceOf(address)', [SELF])).uint256();
+
+p.if(balance.gt(1000), () => {
+  // Reusing `balance` inside the branch lowers to the correct DUP depth.
+  p.call(SELF, encodeCall('execute(uint256)', [balance]));
+});
+
+const c = p.compile();  // same compiler and encoder as the AST layer below
+```
+
+This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall`), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(...)` with balanced branch joins, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
+
+### AST API
+
+The low-level API that the builder lowers into remains fully available:
 
 ```ts
 import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop, compile, disassemble } from './ts/src/index.ts';
@@ -129,7 +159,7 @@ make fmt         # Format Solidity files
 make clean       # Remove Forge and Yul build output
 ```
 
-The TypeScript tests need only Node; `cd ts && npm install` additionally provides `npm run typecheck` (the only dev dependencies are `typescript` and `@types/node`). `npm test` is equivalent to `make test-ts`.
+The TypeScript tests need only Node; `cd ts && npm install` additionally provides `npm run typecheck` (the dev dependencies are `typescript` and `@types/node`; `@noble/hashes` is the toolchain runtime dependency described above). `npm test` is equivalent to `make test-ts`.
 
 Use another test with:
 
