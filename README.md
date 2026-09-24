@@ -77,11 +77,50 @@ If LISA is embedded in or delegated to by a smart wallet, the same principle app
 
 `STATICCALL` is available for read-only external execution. A **guest** `DELEGATECALL` instruction is intentionally not part of the current LISA ISA. This is separate from a host wallet using EVM `DELEGATECALL` to invoke the LISA interpreter itself. Guest delegate execution can be added later if a concrete module/storage use case justifies the additional semantics.
 
+## TypeScript toolchain
+
+The `ts/` directory contains the TypeScript toolchain around the runtime:
+
+```text
+TypeScript API  ->  AST  ->  compiler (labels)  ->  encoder  ->  bytecode  ->  LISA.yul
+```
+
+The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
+
+Requires Node.js >= 23.6 (TypeScript is run directly; no build step, no runtime dependencies).
+
+```ts
+import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop, compile, disassemble } from './ts/src/index.ts';
+
+// Countdown loop with symbolic labels — no manual jump offsets.
+const p = program(
+  push(0),            // accumulator
+  push(3),            // counter
+  label('head'),
+  dup(1),
+  jz('done'),         // forward label
+  swap(2), push(1), add,
+  swap(2), push(1), sub,
+  jmp('head'),        // backward label
+  label('done'),
+  pop,
+  stop,
+);
+
+const c = compile(p);
+c.hex;                          // 0x0100010322012c000f230201012423020101252b80102100
+disassemble(c.bytes);           // ["PUSH1 0x0", "PUSH1 0x3", ..., "JZ +15 -> 22", ...]
+```
+
+Jumps encode the VM's 16-bit sign-magnitude offsets relative to the operand field (opcode address + 1); the compiler resolves labels, and `encode`/`decode` handle the widths, immediates, and blobs. Byte-level details are exercised in `ts/test/` and executed against the real Yul runtime through generated fixtures (`ts/tools/gen-runtime-fixtures.ts` -> `test/LISATooling.t.sol`).
+
 ## Build and test
 
 ```bash
 make build       # Compile Solidity harnesses and LISA creation bytecode
-make test        # Recompile, then run offline tests
+make fixtures    # Compile TS fixture programs against the built runtime bytes
+make test        # Recompile, generate fixtures, then run offline tests (incl. TS runtime-compat)
+make test-ts     # Run the TypeScript unit/round-trip tests (node --test)
 make test-opt    # Run the suite against optimized Yul bytecode
 make trace       # Trace the full integration test
 make debug       # Open Forge's debugger on the full integration test
@@ -89,6 +128,8 @@ make snapshot    # Record gas snapshots
 make fmt         # Format Solidity files
 make clean       # Remove Forge and Yul build output
 ```
+
+The TypeScript tests need only Node; `cd ts && npm install` additionally provides `npm run typecheck` (the only dev dependencies are `typescript` and `@types/node`). `npm test` is equivalent to `make test-ts`.
 
 Use another test with:
 

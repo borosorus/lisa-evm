@@ -1,0 +1,19 @@
+{
+  "name": "lisa-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript toolchain for the LISA stack VM: ISA, encoder, disassembler, AST, compiler, labels",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "fixtures": "node tools/gen-runtime-fixtures.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.3"
+  }
+}
