@@ -220,6 +220,20 @@ function hlConditionalBalanceCall(limit: number): Program {
 addFixture('hl_balance_conditional_call', hlConditionalBalanceCall(1000), 'ok', 1500n, 1500n);
 addFixture('hl_branch_not_taken', hlConditionalBalanceCall(2000), 'ok', 1500n, 0n);
 
+// The emitted range guard must REVERT on an out-of-range runtime address
+// (balance * 2**160 exceeds 2**160 without wrapping), proving the guard path
+// itself, not just its pass-through side.
+addFixture(
+  'hl_argument_guard_reverts',
+  (() => {
+    const p = createProgram();
+    const balance = p.staticCall(CALLER, encodeCall('balanceOf(address)', [SELF])).uint256();
+    p.staticCall(CALLER, encodeCall('balanceOf(address)', [balance.mul(2n ** 160n)]));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
 addFixture(
   'hl_failed_call_reverts',
   (() => {
