@@ -13,5 +13,8 @@ node_modules/
 # Docs
 docs/
 
+# Agent workflow notes
+QWEN.md
+
 # Dotenv file
 .env
