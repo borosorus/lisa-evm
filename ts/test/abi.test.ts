@@ -81,9 +81,25 @@ test('encodeCall validates arguments', () => {
   assert.throws(() => encodeCall('noArgs()', [1n]), TypeError); // count
 });
 
-test('Value arguments pass through untouched', () => {
-  const v = new Value({ t: 'lit', value: 9n });
-  const data = encodeCall('f(uint256)', [v]);
+test('static Values bake; runtime Values pass through untouched as patches', () => {
+  // A literal Value is statically known, so it is baked exactly like a
+  // constant (with the same checks) instead of costing a runtime MSTORE.
+  const baked = encodeCall('f(uint8)', [new Value({ t: 'lit', value: 9n })]);
+  assert.equal(baked.patches.length, 0);
+  assert.equal(bytesToHex(baked.template.slice(4, 36)), `0x${'00'.repeat(31)}09`);
+  assert.throws(() => encodeCall('f(uint8)', [new Value({ t: 'lit', value: 256n })]), RangeError);
+
+  // A runtime Value becomes a patch, carrying its type's bound.
+  const data = encodeCall('f(uint256)', [SELF]);
   assert.equal(data.patches.length, 1);
-  assert.equal(data.patches[0]!.arg, v);
+  assert.equal(data.patches[0]!.arg, SELF);
+  assert.equal(data.patches[0]!.bounds, undefined); // uint256: full word is canonical
+  assert.equal(encodeCall('f(address)', [SELF]).patches[0]!.bounds, 2n ** 160n);
+  assert.equal(encodeCall('f(bool)', [SELF]).patches[0]!.bounds, 2n);
+});
+
+test('runtime bytesN arguments are refused, not silently misaligned', () => {
+  // Constants left-align; a runtime word's alignment is unknowable here.
+  assert.throws(() => encodeCall('f(bytes4)', [SELF]), TypeError);
+  assert.throws(() => encodeCall('f(bytes32)', [SELF]), TypeError);
 });

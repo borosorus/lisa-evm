@@ -59,10 +59,13 @@ interface SlotRef {
 export class CallResult {
   readonly builder: ProgramBuilder;
   readonly seq: number;
+  /** Branch scope the call was emitted in; decoding after it closes is a bug. */
+  readonly scope: number;
 
-  constructor(builder: ProgramBuilder, seq: number) {
+  constructor(builder: ProgramBuilder, seq: number, scope: number) {
     this.builder = builder;
     this.seq = seq;
+    this.scope = scope;
   }
 
   /** Decode return word at byte offset 0. Word0 aliases: all read one RDLOAD. */
@@ -167,6 +170,9 @@ export class ProgramBuilder {
     if (result.seq !== this.callSeq) {
       throw new LoweringError('CallResult is stale: return data was replaced by a later call');
     }
+    if (!this.scopeStack.includes(result.scope)) {
+      throw new LoweringError('CallResult is out of scope: its branch has closed');
+    }
     this.produce(1, push(offset)); // placeholder offset word
     this.nodes.push(rdloadNode); // replaces the top word in place
     const ref: SlotRef = { id: this.nextSlot++, scope: this.scopeStack[this.scopeStack.length - 1]! };
@@ -186,6 +192,18 @@ export class ProgramBuilder {
       this.produce(1, push(BigInt(patch.offset)));
       this.consume(2, add, 1); // -> memory offset of the argument word
       this.materialize(patch.arg);
+      if (patch.bounds !== undefined) {
+        // The argument is a runtime word that must stay canonical for its
+        // ABI type (< bounds). LISA has no masking opcode, so the check runs
+        // at program runtime: LT + revert-if-out-of-range (stack-neutral).
+        const fail = this.freshLabel('arg_fail');
+        const done = this.freshLabel('arg_ok');
+        this.produce(1, dup(1));
+        this.produce(1, push(patch.bounds));
+        this.consume(2, opNode('LT'), 1);
+        this.consume(1, jz(fail));
+        this.nodes.push(jmp(done), label(fail), revertNode, label(done));
+      }
       this.consume(2, mstoreNode); // pops value, then offset
     }
 
@@ -200,7 +218,7 @@ export class ProgramBuilder {
     this.consume(1, pop); // discards rdsize
     this.nodes.push(jmp(done));
     this.nodes.push(label(fail), revertNode, label(done));
-    return new CallResult(this, this.callSeq);
+    return new CallResult(this, this.callSeq, this.scopeStack[this.scopeStack.length - 1]!);
   }
 
   private materialize(v: ValueLike): void {

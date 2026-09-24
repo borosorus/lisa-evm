@@ -18,6 +18,13 @@ import { toValue, type Value } from './expr.ts';
 export interface AbiPatch {
   readonly offset: number;
   readonly arg: Value;
+  /**
+   * For runtime (non-literal) Values of narrow types: the emitted program
+   * reverts unless the word is `< bounds`, mirroring the constant path's
+   * range checks (LISA has no masking opcode, so this validates rather than
+   * truncates). Undefined for uint256, whose full word is canonical.
+   */
+  readonly bounds?: bigint;
 }
 
 /** Immutable description of one call's calldata. */
@@ -140,6 +147,20 @@ function typeName(type: TypeSpec): string {
   }
 }
 
+/** Value a runtime word must stay below for the type to remain canonical. */
+function runtimeBounds(type: TypeSpec): bigint | undefined {
+  switch (type.kind) {
+    case 'bool':
+      return 2n; // canonical bool words are 0/1
+    case 'address':
+      return 1n << 160n;
+    case 'uint':
+      return type.size < 256 ? 1n << BigInt(type.size) : undefined;
+    case 'bytes':
+      return undefined; // runtime bytesN arguments are rejected in encodeCall
+  }
+}
+
 /**
  * Build calldata for `signature(args...)`. Constants are baked into the
  * template; high-level Values become runtime MSTORE patches.
@@ -157,11 +178,23 @@ export function encodeCall(signature: string, args: readonly AbiArg[] = []): Cal
   types.forEach((typeText, i) => {
     const type = parseType(typeText);
     const arg = args[i]!;
+    const where = `encodeCall("${signature}") arg ${i} (${typeText})`;
     if (isValueLikeHandle(arg)) {
-      words.push(new Uint8Array(32)); // patched at runtime; placeholder zeros
-      patches.push({ offset: 4 + 32 * i, arg });
+      if (arg.term.t === 'lit') {
+        // A statically-known Value is no different from a constant: bake the
+        // canonical word (with the constant path's checks) into the template.
+        words.push(constantWord(type, arg.term.value, where));
+      } else if (type.kind === 'bytes') {
+        // bytesN constants are LEFT-aligned; a runtime word's alignment is
+        // the value's own story and LISA cannot re-align it, so refuse to
+        // guess instead of silently encoding the wrong bytes.
+        throw new TypeError(`${where}: runtime arguments of bytesN are not supported (use a constant)`);
+      } else {
+        words.push(new Uint8Array(32)); // patched at runtime; placeholder zeros
+        patches.push({ offset: 4 + 32 * i, arg, bounds: runtimeBounds(type) });
+      }
     } else {
-      words.push(constantWord(type, arg, `encodeCall("${signature}") arg ${i} (${typeText})`));
+      words.push(constantWord(type, arg, where));
     }
   });
   return {

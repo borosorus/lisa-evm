@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createProgram, LoweringError, type ProgramBuilder } from '../src/builder.ts';
+import { createProgram, LoweringError, type CallResult, type ProgramBuilder } from '../src/builder.ts';
 import { encodeCall } from '../src/abi.ts';
-import { CALLER, SELF, TIMESTAMP, Value } from '../src/expr.ts';
+import { CALLER, context, SELF, TIMESTAMP, Value } from '../src/expr.ts';
 import { decode } from '../src/decode.ts';
+import { hexToBytes } from '../src/bytes.ts';
 
 const CALL_CD = () => encodeCall('execute(uint256)', [42n]);
 
@@ -26,9 +27,11 @@ test('acceptance program lowers to the golden bytes', () => {
     p.call(CALLER, encodeCall('execute(uint256)', [balance]));
   });
   const c = p.compile();
+  // Includes the runtime range guard on the SELF address patch:
+  // DUP1, PUSH21 2^160, LT, JZ fail / fail: REVERT — stack-neutral.
   assert.equal(
     c.hex,
-    '0x342d002470a0823100000000000000000000000000000000000000000000000000000000000000002202010424332e312c0006212b0003390100320203e82202292c003d3401002d0024fe0d94c10000000000000000000000000000000000000000000000000000000000000000220201042422062e302c0006212b00033900',
+    '0x342d002470a082310000000000000000000000000000000000000000000000000000000000000000220201042433220115010000000000000000000000000000000000000000292c00052b0003392e312c0006212b0003390100320203e82202292c003d3401002d0024fe0d94c10000000000000000000000000000000000000000000000000000000000000000220201042422062e302c0006212b00033900',
   );
   // Golden is only meaningful if it also decodes cleanly through the low layer.
   for (const instr of decode(c.bytes)) void instr;
@@ -101,4 +104,45 @@ test('CALL default value is PUSH1 0 and explicit values materialize', () => {
   // first CALL: CALLER PUSH0 BLOB...; second: CALLER TIMESTAMP BLOB...
   assert.ok(hex.includes('3401002d0024'));
   assert.ok(hex.includes('34382d0024')); // second: CALLER TIMESTAMP(0x38) BLOB...
+});
+
+test('call results from a closed branch are rejected', () => {
+  // A CallResult captured inside a branch would decode returndata that the
+  // skipped/taken runtime path may never have produced: reject after close.
+  const p = createProgram();
+  let leaked: CallResult | undefined;
+  p.if(1, () => {
+    leaked = p.staticCall(CALLER, CALL_CD());
+  });
+  assert.throws(
+    () => leaked!.uint256(),
+    (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+  );
+});
+
+test('runtime narrow-type arguments get a range guard; full words do not', () => {
+  const reverts = (hex: string) =>
+    decode(hexToBytes(hex)).filter((i) => i.name === 'REVERT').length;
+
+  const addr = createProgram();
+  addr.staticCall(CALLER, encodeCall('f(address)', [SELF]));
+  // DUP1, PUSH21 2**160, LT + revert-if-out-of-range before the MSTORE.
+  const addrGuard = '2201' + '15' + '01' + '00'.repeat(20) + '29';
+  assert.ok(addr.compile().hex.includes(addrGuard));
+  assert.equal(reverts(addr.compile().hex), 2); // call guard + argument guard
+
+  const flag = createProgram();
+  flag.staticCall(CALLER, encodeCall('f(bool)', [CALLER]));
+  assert.ok(flag.compile().hex.includes('2201010229')); // DUP1, PUSH1 2, LT
+
+  const wide = createProgram();
+  wide.staticCall(CALLER, encodeCall('f(uint256)', [CALLER]));
+  assert.equal(reverts(wide.compile().hex), 1); // call guard only
+});
+
+test('context() only accepts push-one context opcodes', () => {
+  assert.equal(context('SELF').term.t, 'ctx');
+  for (const op of ['POP', 'ADD', 'STOP', 'REVERT'] as const) {
+    assert.throws(() => context(op), TypeError, op);
+  }
 });

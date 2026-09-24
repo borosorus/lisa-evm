@@ -230,6 +230,19 @@ addFixture(
   'revert',
 );
 
+// Baseline: calling emptyReturn() itself SUCCEEDS (its guard passes). Only
+// the decode below can turn the same call into a revert, which pins the
+// revert on the RDLOAD-out-of-returndata path rather than a failed call.
+addFixture(
+  'hl_empty_return_call_ok',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, encodeCall('emptyReturn()'));
+    return p.toAST();
+  })(),
+  'ok',
+);
+
 addFixture(
   'hl_empty_return_decode_reverts',
   (() => {

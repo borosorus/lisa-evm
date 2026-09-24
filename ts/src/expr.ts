@@ -69,7 +69,15 @@ export function literal(value: bigint): Value {
   return new Value({ t: 'lit', value });
 }
 
+/** Context opcodes that push exactly one word — the only safe `ctx` terms. */
+const PUSH_CONTEXT_OPS: readonly NoOperandOp[] = ['SELF', 'CALLER', 'GAS', 'TIMESTAMP', 'SELFBALANCE'];
+
 export function context(op: NoOperandOp): Value {
+  if (!PUSH_CONTEXT_OPS.includes(op)) {
+    throw new TypeError(
+      `context("${op}"): not a push-one context opcode (allowed: ${PUSH_CONTEXT_OPS.join(', ')})`,
+    );
+  }
   return new Value({ t: 'ctx', op });
 }
 

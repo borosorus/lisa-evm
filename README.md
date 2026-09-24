@@ -113,7 +113,7 @@ p.if(balance.gt(1000), () => {
 const c = p.compile();  // same compiler and encoder as the AST layer below
 ```
 
-This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall`), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(...)` with balanced branch joins, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
+This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(...)` with balanced branch joins, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
 
 ### AST API
 
