@@ -70,5 +70,5 @@ export function toBytes(input: number | bigint | string | Uint8Array): Uint8Arra
     return toBE(BigInt(input), byteLength(BigInt(input)));
   }
   if (typeof input === 'bigint') return toBE(input, byteLength(input));
-  return input;
+  return input.slice(); // never alias caller-owned bytes
 }

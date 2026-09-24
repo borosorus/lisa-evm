@@ -28,6 +28,12 @@ export interface Instruction {
   readonly index?: number;
   readonly rel?: number;
   readonly data?: Uint8Array;
+  /**
+   * Raw 16-bit jump word, retained by the decoder. Byte-exact re-encoding
+   * of sign-magnitude negative zero (`0x8000`) is otherwise lossy; normal
+   * encoding never needs it, so `encode` prefers it only when present.
+   */
+  readonly relWord?: number;
 }
 
 /**
@@ -122,9 +128,12 @@ export function encode(program: readonly AnyInstruction[]): Uint8Array {
       case 'index':
         parts.push(head, new Uint8Array([instr.index!]));
         break;
-      case 'rel16':
-        parts.push(head, toBE(BigInt(encodeRel16(instr.rel!)), 2));
+      case 'rel16': {
+        // Prefer the decoder-retained raw word for byte-exact re-encoding
+        // (sign-magnitude -0 would otherwise normalize to 0x0000).
+        parts.push(head, toBE(BigInt(instr.relWord ?? encodeRel16(instr.rel!)), 2));
         break;
+      }
       case 'blob': {
         const len = instr.data!.length;
         parts.push(head, toBE(BigInt(len), 2), instr.data!);

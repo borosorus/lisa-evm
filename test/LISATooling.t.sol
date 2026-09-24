@@ -26,10 +26,9 @@ contract LISAToolingTest is Test {
     }
 
     function test_Fixtures_GeneratedPrograms() public {
-        if (!vm.exists(FIXTURES)) {
-            emit log_string("fixtures not generated; run `make fixtures`");
-            return;
-        }
+        // Never pass vacuously: this suite must always execute the generated
+        // programs. Build them with `make fixtures` (or the generator directly).
+        require(vm.exists(FIXTURES), "fixtures missing; run `make fixtures`");
 
         string memory json = vm.readFile(FIXTURES);
         uint256 count = vm.parseJsonUint(json, "$.count");

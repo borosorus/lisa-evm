@@ -43,6 +43,7 @@ export function decode(program: Uint8Array): DecodedInstruction[] {
     let value: bigint | undefined;
     let index: number | undefined;
     let rel: number | undefined;
+    let relWord: number | undefined;
     let target: number | undefined;
     let data: Uint8Array | undefined;
 
@@ -63,7 +64,8 @@ export function decode(program: Uint8Array): DecodedInstruction[] {
       }
       case 'rel16': {
         const bytes = readSlice(program, offset + 1, 2, offset, `${spec.name} offset`);
-        rel = decodeRel16((bytes[0] << 8) | bytes[1]);
+        relWord = (bytes[0] << 8) | bytes[1];
+        rel = decodeRel16(relWord);
         target = offset + 1 + rel;
         size = 3;
         break;
@@ -84,7 +86,7 @@ export function decode(program: Uint8Array): DecodedInstruction[] {
       size,
       ...(value !== undefined ? { value } : {}),
       ...(index !== undefined ? { index } : {}),
-      ...(rel !== undefined ? { rel, target: target! } : {}),
+      ...(rel !== undefined ? { rel, relWord: relWord!, target: target! } : {}),
       ...(data !== undefined ? { data } : {}),
     });
     offset += size;

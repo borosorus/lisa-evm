@@ -57,6 +57,15 @@ contract LISATest is Test {
         _assertInvalid(hex"2b0004"); // JMP +4 from pc=1, beyond calldata
     }
 
+    function test_TruncatedJump() public {
+        _assertInvalid(hex"2b"); // JMP without any rel16 byte
+        _assertInvalid(hex"2b00"); // JMP with only one rel16 byte
+    }
+
+    function test_TruncatedJZTaken() public {
+        _assertInvalid(hex"01002c"); // PUSH1 0, JZ taken without rel16 bytes
+    }
+
     function test_MemoryOffsetWraparound() public {
         bytes memory program = abi.encodePacked(
             bytes1(0x20),

@@ -90,6 +90,15 @@ test('decoder round-trips every family', () => {
   );
 });
 
+test('decode -> encode is byte-exact for sign-magnitude negative zero', () => {
+  // rel16 0x8000 is "-0": numerically 0, but its raw word must survive a
+  // decode/encode round-trip instead of collapsing to 0x0000.
+  const bytes = hexToBytes('0x2b8000');
+  const decoded = decode(bytes);
+  assert.equal(decoded[0].rel, 0);
+  assert.equal(hex(encode(decoded)), '0x2b8000');
+});
+
 test('decoder tracks offsets and jump targets correctly', () => {
   // Ground truth from LISA.t.sol test_Program_Loop:
   //   PUSH1 3 / DUP1 / JZ +84  with the JZ rel field at byte 5 => target 89.
