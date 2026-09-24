@@ -14,6 +14,7 @@ contract LISAToolingTest is Test {
 
     address internal target;
     uint256 public a;
+    uint256 public setACalls;
 
     function setUp() public {
         bytes memory init = vm.parseBytes(vm.readFile("build/yul/LISA.bin"));
@@ -48,6 +49,7 @@ contract LISAToolingTest is Test {
             }
 
             a = 0;
+            setACalls = 0;
             (bool ok,) = target.call{gas: 10_000_000}(program);
 
             if (keccak256(bytes(expect)) == keccak256("revert")) {
@@ -55,6 +57,9 @@ contract LISAToolingTest is Test {
             } else {
                 assertTrue(ok, string.concat(name, ": expected success"));
                 if (hasA) {
+                    // The write-back must actually have run; otherwise an
+                    // expectA of 0 would pass on an untouched `a` alone.
+                    assertEq(setACalls, 1, string.concat(name, ": write-back ran"));
                     assertEq(a, vm.parseJsonUint(json, string.concat(path, ".expectA")), name);
                 }
             }
@@ -62,10 +67,12 @@ contract LISAToolingTest is Test {
     }
 
     function setA(uint256 value) external {
+        setACalls++;
         a = value;
     }
 
-    /// CALL setA(stackTop): PUSH20 this; PUSH1 0; BLOB setA(0); DUP2, +4, DUP6, MSTORE, CALL, STOP
+    /// CALL setA(stackTop): PUSH20 this; PUSH1 0; BLOB setA(0); DUP2, +4, DUP6, MSTORE, CALL,
+    /// then revert if the CALL failed (JZ pops the success flag), else pop return size and STOP.
     function _writeTopToA() internal view returns (bytes memory) {
         bytes memory setup = abi.encodePacked(
             bytes1(0x14),
@@ -78,18 +85,10 @@ contract LISAToolingTest is Test {
             bytes32(0)
         );
 
-        bytes memory patch = abi.encodePacked(
-            bytes1(0x22),
-            bytes1(0x02), // DUP2 offset
-            bytes1(0x01),
-            bytes1(0x04), // PUSH1 4
-            bytes1(0x24), // ADD -> argument offset
-            bytes1(0x22),
-            bytes1(0x06), // DUP6 stack top
-            bytes1(0x2e), // MSTORE
-            bytes1(0x30), // CALL
-            bytes1(0x00) // STOP
-        );
+        // DUP2 (offset), PUSH1 4, ADD -> argument word, DUP6 (stack top), MSTORE,
+        // CALL -> [returndatasize, success]; JZ pops success: taken (failed write)
+        // jumps +4 to the REVERT; on success falls through to POP, STOP.
+        bytes memory patch = hex"220201042422062e302c0004210039";
 
         return bytes.concat(setup, patch);
     }

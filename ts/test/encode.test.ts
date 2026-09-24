@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { bytesToHex, concat, hexToBytes } from '../src/bytes.ts';
 import { encode, instructionSize, type Instruction } from '../src/encode.ts';
 import { decode, DecodeError, disassemble } from '../src/decode.ts';
+import { INSTRUCTIONS } from '../src/isa.ts';
 
 const hex = (b: Uint8Array) => bytesToHex(b);
 
@@ -97,6 +98,50 @@ test('decode -> encode is byte-exact for sign-magnitude negative zero', () => {
   const decoded = decode(bytes);
   assert.equal(decoded[0].rel, 0);
   assert.equal(hex(encode(decoded)), '0x2b8000');
+});
+
+test('encode rejects a relWord that disagrees with rel', () => {
+  // relWord only exists to re-emit the exact bytes that were decoded; a
+  // hand-supplied word encoding a different delta must not shadow rel.
+  assert.throws(() => encode([{ opcode: 0x2b, rel: 2, relWord: 0x8000 }]), RangeError);
+  assert.throws(() => encode([{ opcode: 0x2b, rel: 5, relWord: 6 }]), RangeError);
+  assert.throws(() => encode([{ opcode: 0x2c, rel: -1, relWord: 0x10000 }]), RangeError);
+  // A consistent word is accepted and emitted verbatim.
+  assert.equal(hex(encode([{ opcode: 0x2b, rel: 0, relWord: 0x8000 }])), '0x2b8000');
+});
+
+test('every ISA opcode encodes and decodes byte-exactly', () => {
+  const program: Instruction[] = [];
+  for (const [opcode, spec] of INSTRUCTIONS) {
+    switch (spec.operandKind) {
+      case 'push':
+        program.push({ opcode, value: 1n });
+        break;
+      case 'index':
+        program.push({ opcode, index: 1 });
+        break;
+      case 'rel16':
+        program.push({ opcode, rel: 0 });
+        break;
+      case 'blob':
+        program.push({ opcode, data: hexToBytes('0xab') });
+        break;
+      default:
+        program.push({ opcode });
+    }
+  }
+  const bytes = encode(program);
+  const decoded = decode(bytes);
+  assert.equal(decoded.length, INSTRUCTIONS.size);
+  let offset = 0;
+  for (const [opcode, spec] of INSTRUCTIONS) {
+    const instr = decoded.find((i) => i.offset === offset)!;
+    assert.equal(instr.opcode, opcode, spec.name);
+    assert.equal(instr.name, spec.name);
+    offset += instr.size;
+  }
+  assert.equal(offset, bytes.length, 'no trailing bytes');
+  assert.equal(hex(encode(decoded)), hex(bytes));
 });
 
 test('decoder tracks offsets and jump targets correctly', () => {

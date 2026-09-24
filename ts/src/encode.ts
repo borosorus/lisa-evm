@@ -97,6 +97,21 @@ function checkOperands(instr: Instruction): void {
     }
     case 'rel16': {
       encodeRel16(instr.rel!); // validates range
+      if (instr.relWord !== undefined) {
+        // The retained raw word must be a valid u16 encoding of `rel`;
+        // otherwise two fields would disagree and the emitted bytes would
+        // silently contradict the instruction's `rel`.
+        if (
+          !Number.isInteger(instr.relWord) ||
+          instr.relWord < 0 ||
+          instr.relWord > 0xffff ||
+          decodeRel16(instr.relWord) !== instr.rel!
+        ) {
+          throw new RangeError(
+            `relWord 0x${(instr.relWord ?? 0).toString(16)} disagrees with rel ${instr.rel!}`,
+          );
+        }
+      }
       break;
     }
     case 'blob': {
