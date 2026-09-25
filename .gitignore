@@ -3,6 +3,7 @@ cache/
 out/
 build/
 node_modules/
+ts/dist/
 .DS_Store
 */.DS_Store
 # Ignores development broadcast logs

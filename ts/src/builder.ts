@@ -68,15 +68,27 @@ export class CallResult {
     this.scope = scope;
   }
 
+  /**
+   * Decode the 32-byte returndata word starting at byte `offset` (must be a
+   * multiple of 32). Out-of-bounds reads fail at runtime per LISA's RDLOAD
+   * semantics, exactly as the scalar aliases below do for word 0.
+   */
+  word(offset: number): Value {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset % 32 !== 0) {
+      throw new RangeError(`returndata word offset must be a non-negative multiple of 32, got ${offset}`);
+    }
+    return this.builder.decodeWord(this, BigInt(offset));
+  }
+
   /** Decode return word at byte offset 0. Word0 aliases: all read one RDLOAD. */
   uint256(): Value {
-    return this.builder.decodeWord(this, 0n);
+    return this.word(0);
   }
   bytes32(): Value {
-    return this.builder.decodeWord(this, 0n);
+    return this.word(0);
   }
   bool(): Value {
-    return this.builder.decodeWord(this, 0n);
+    return this.word(0);
   }
 }
 

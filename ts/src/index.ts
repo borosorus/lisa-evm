@@ -1,20 +1,22 @@
 /**
  * Public entry point for the LISA TypeScript toolchain.
  *
- * Low layers: ISA table (isa.ts) → encoder/decoder (encode.ts, decode.ts) →
- * AST (ast.ts) → compiler with label resolution (compile.ts) → API (api.ts).
- * High layer: TypeScript-first builder (expr.ts, abi.ts, builder.ts) which
- * lowers onto the same AST. keccak.ts is internal (name clash with the
- * KECCAK256 node constant in api.ts).
+ * This surface is intentionally curated: the TypeScript-first builder
+ * (builder.ts, expr.ts), ABI calldata (abi.ts), the shared pipeline entry
+ * (compile), and bytecode introspection (decode). keccak.ts is internal.
+ *
+ * The lower-level plumbing stays available as documented deep imports:
+ *   lisa-tooling/api    - AST node constructors (program, push, add, ...)
+ *   lisa-tooling/ast    - AST types (Node, Program, NoOperandOp)
+ *   lisa-tooling/encode - the instruction encoder
+ *   lisa-tooling/isa    - canonical ISA metadata
+ *   lisa-tooling/bytes  - byte/hex helpers
+ * (In this repository, import ts/src/<module>.ts instead of the subpath.)
  */
 
-export * from './isa.ts';
-export * from './bytes.ts';
-export * from './encode.ts';
-export * from './decode.ts';
-export * from './ast.ts';
-export * from './compile.ts';
-export * from './api.ts';
+export * from './builder.ts';
 export * from './expr.ts';
 export * from './abi.ts';
-export * from './builder.ts';
+export { compile, CompileError, type CompiledProgram } from './compile.ts';
+export { decode, disassemble, DecodeError, type DecodedInstruction } from './decode.ts';
+export type { Node, NoOperandOp, Program } from './ast.ts';

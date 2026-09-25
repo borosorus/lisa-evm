@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createProgram, LoweringError, type CallResult, type ProgramBuilder } from '../src/builder.ts';
-import { encodeCall } from '../src/abi.ts';
+import { encodeCall, rawCalldata } from '../src/abi.ts';
 import { CALLER, context, SELF, TIMESTAMP, Value } from '../src/expr.ts';
 import { decode } from '../src/decode.ts';
 import { hexToBytes } from '../src/bytes.ts';
@@ -145,4 +145,32 @@ test('context() only accepts push-one context opcodes', () => {
   for (const op of ['POP', 'ADD', 'STOP', 'REVERT'] as const) {
     assert.throws(() => context(op), TypeError, op);
   }
+});
+
+test('generic return-word reads emit PUSH offset; RDLOAD at the given byte offset', () => {
+  const p = createProgram();
+  const r = p.staticCall(CALLER, encodeCall('pair()'));
+  r.word(0);
+  r.word(32); // second word is 32 bytes in
+  const hex = p.compile().hex;
+  assert.ok(hex.includes('010032'), 'PUSH1 0 then RDLOAD (word 0)');
+  assert.ok(hex.includes('012032'), 'PUSH1 32 then RDLOAD (word 1)');
+});
+
+test('word() rejects non-word-aligned or negative offsets', () => {
+  const p = createProgram();
+  const r = p.staticCall(CALLER, encodeCall('emptyReturn()'));
+  for (const off of [-32, 4, 31, 33, 1.5, Number.NaN]) {
+    assert.throws(() => r.word(off), RangeError, `offset ${off}`);
+  }
+});
+
+test('rawCalldata flows through the same BLOB call path', () => {
+  const cd = rawCalldata('0xa9059cbb' + '11'.repeat(32));
+  const p = createProgram();
+  p.staticCall(CALLER, cd);
+  const hex = p.compile().hex;
+  // BLOB with the exact template bytes, then STATICCALL (0x31).
+  assert.ok(hex.includes('2d0024a9059cbb' + '11'.repeat(32)));
+  assert.ok(hex.includes('31')); // STATICCALL reached, no MSTORE patches emitted
 });

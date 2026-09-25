@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { bytesToHex, hexToBytes } from '../src/bytes.ts';
-import { encodeCall, parseSignature, selectorOf } from '../src/abi.ts';
+import { encodeCall, parseSignature, rawCalldata, selectorOf } from '../src/abi.ts';
 import { SELF, Value } from '../src/expr.ts';
 
 test('parseSignature accepts canonical forms', () => {
@@ -102,4 +102,34 @@ test('runtime bytesN arguments are refused, not silently misaligned', () => {
   // Constants left-align; a runtime word's alignment is unknowable here.
   assert.throws(() => encodeCall('f(bytes4)', [SELF]), TypeError);
   assert.throws(() => encodeCall('f(bytes32)', [SELF]), TypeError);
+});
+
+test('rawCalldata accepts pre-encoded calldata verbatim', () => {
+  const encoded = '0xa9059cbb' + '11'.repeat(32) + '22'.repeat(32);
+  const fromHex = rawCalldata(encoded);
+  assert.equal(bytesToHex(fromHex.template), encoded);
+  assert.deepEqual(fromHex.patches, []);
+  assert.deepEqual([...rawCalldata(hexToBytes(encoded)).template], [...fromHex.template]);
+  assert.equal(fromHex.signature, undefined); // raw calldata carries no ABI metadata
+
+  // Empty calldata is representable.
+  assert.equal(rawCalldata('0x').template.length, 0);
+});
+
+test('rawCalldata validates like the byte helpers and stays immutable', () => {
+  assert.throws(() => rawCalldata('0x0z'), RangeError); // hexToBytes validation
+  assert.throws(() => rawCalldata('abc'), RangeError); // odd length
+  assert.throws(
+    () => rawCalldata(`0x${'00'.repeat(0x10000)}`), // beyond BLOB's u16 length
+    RangeError,
+  );
+  const data = rawCalldata('0xa9059cbb');
+  assert.throws(() => {
+    'use strict';
+    (data as { patches: unknown }).patches = [];
+  }, TypeError);
+  assert.throws(() => {
+    'use strict';
+    (data as { template: unknown }).template = new Uint8Array();
+  }, TypeError);
 });

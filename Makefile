@@ -37,4 +37,4 @@ fmt:
 
 clean:
 	forge clean
-	rm -rf build/yul build/fixtures
+	rm -rf build/yul build/fixtures ts/dist

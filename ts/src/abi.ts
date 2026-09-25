@@ -29,9 +29,12 @@ export interface AbiPatch {
 
 /** Immutable description of one call's calldata. */
 export interface CallData {
-  readonly signature: string;
-  readonly selector: Uint8Array; // 4 bytes
-  readonly inputs: readonly string[];
+  /** ABI signature; absent for pre-encoded raw calldata (see rawCalldata). */
+  readonly signature?: string;
+  /** 4-byte selector; absent for raw calldata, which may carry none. */
+  readonly selector?: Uint8Array; // 4 bytes
+  /** Input type names; absent for raw calldata. */
+  readonly inputs?: readonly string[];
   /** selector || word0 || word1 ... (constant words inline, holes zeroed) */
   readonly template: Uint8Array;
   readonly patches: readonly AbiPatch[];
@@ -213,4 +216,20 @@ function isValueLikeHandle(arg: AbiArg): arg is Value {
 /** Selector for a signature (exported for tests and address bookkeeping). */
 export function selectorOf(signature: string): string {
   return bytesToHex(keccakAscii(signature).slice(0, 4));
+}
+
+/**
+ * Calldata encoded elsewhere, used verbatim: no ABI parsing, no runtime
+ * patches; it lowers through the same BLOB/call path as encodeCall output.
+ * Accepts the project's hex/byte representations (validated like them) and
+ * returns a frozen CallData whose ABI metadata is absent by design.
+ */
+export function rawCalldata(bytes: string | Uint8Array): CallData {
+  const template = toBytes(bytes); // same validation as the other byte helpers
+  if (template.length > 0xffff) {
+    throw new RangeError(`calldata of ${template.length} bytes exceeds the BLOB u16 length limit`);
+  }
+  // The descriptor is frozen; JS offers no immutable typed arrays, so the
+  // template follows the same read-only convention as encodeCall output.
+  return Object.freeze({ template, patches: Object.freeze([]) as readonly AbiPatch[] });
 }

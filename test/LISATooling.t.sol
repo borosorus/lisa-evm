@@ -96,6 +96,11 @@ contract LISAToolingTest is Test {
         recordedAmount = amount;
     }
 
+    /// Two-word return data for the generic return-word (word(32)) fixtures.
+    function pair() external pure returns (uint256, uint256) {
+        return (11, 22);
+    }
+
     function alwaysReverts() external pure {
         revert("always reverts");
     }

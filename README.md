@@ -89,7 +89,7 @@ encodeCall, p.if              add, ...                  AST nodes)
 
 The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
 
-Requires Node.js >= 23.6 (TypeScript is run directly; no build step). The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing.
+Working inside this repository requires Node.js >= 23.6 (TypeScript is run directly; no build step). The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing. Other TypeScript projects consume `ts/` as a normal built package — see [Using as a package](#using-as-a-package) below.
 
 ### TypeScript-first API
 
@@ -115,12 +115,23 @@ const c = p.compile();  // same compiler and encoder as the AST layer below
 
 This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(...)` with balanced branch joins, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
 
+Calldata encoded elsewhere drops straight into the same call path, and any 32-byte return-data word is readable:
+
+```ts
+p.call(target, rawCalldata('0xa9059cbb...'));        // pre-encoded, no ABI parsing
+
+const result = p.staticCall(target, encodeCall('pair()'));
+const firstWord = result.uint256();                  // word at byte offset 0
+const secondWord = result.word(32);                  // ...or any aligned word
+```
+
 ### AST API
 
 The low-level API that the builder lowers into remains fully available:
 
 ```ts
-import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop, compile, disassemble } from './ts/src/index.ts';
+import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop } from './ts/src/api.ts';
+import { compile, disassemble } from './ts/src/index.ts';
 
 // Countdown loop with symbolic labels — no manual jump offsets.
 const p = program(
@@ -143,6 +154,21 @@ disassemble(c.bytes);           // ["PUSH1 0x0", "PUSH1 0x3", ..., "JZ +15 -> 22
 ```
 
 Jumps encode the VM's 16-bit sign-magnitude offsets relative to the operand field (opcode address + 1); the compiler resolves labels, and `encode`/`decode` handle the widths, immediates, and blobs. Byte-level details are exercised in `ts/test/` and executed against the real Yul runtime through generated fixtures (`ts/tools/gen-runtime-fixtures.ts` -> `test/LISATooling.t.sol`).
+
+### Using as a package
+
+`ts/` is also a normal ESM package (`lisa-tooling`). Build it once with `cd ts && npm install && npm run build`, which emits `dist/` JavaScript plus `.d.ts` declarations (no build step is needed by consumers). Depend on it from another project, for example:
+
+```jsonc
+{ "dependencies": { "lisa-tooling": "file:./path/to/lisa-evm/ts" } }
+```
+
+```ts
+import { createProgram, encodeCall, rawCalldata, compile, SELF } from 'lisa-tooling';
+import { program, push, add, stop } from 'lisa-tooling/api'; // low-level AST, deep import
+```
+
+The root entry (`lisa-tooling`) exposes the builder, ABI calldata, `compile`, and the decoder. The lower-level plumbing stays available through documented subpaths — `lisa-tooling/api`, `/ast`, `/encode`, `/isa`, `/bytes` — and equals the `ts/src/<module>.ts` files shown in the examples above. `keccak.ts` is internal; the public `@noble/hashes` dependency is the package's only third-party runtime import, and nothing in the built runtime touches Node, the filesystem, or repository paths (tests and fixture generators may, and are excluded from the package).
 
 ## Build and test
 

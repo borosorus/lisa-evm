@@ -38,7 +38,7 @@ import {
   sub,
   swap,
 } from '../src/api.ts';
-import { createProgram, encodeCall, CALLER, SELF } from '../src/index.ts';
+import { createProgram, encodeCall, rawCalldata, selectorOf, CALLER, SELF } from '../src/index.ts';
 import { keccakAscii, keccakBytes } from '../src/keccak.ts';
 
 interface Fixture {
@@ -262,6 +262,57 @@ addFixture(
   (() => {
     const p = createProgram();
     p.staticCall(CALLER, encodeCall('emptyReturn()')).uint256(); // RDLOAD beyond returndata
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// --- Raw (pre-encoded) calldata ------------------------------------------------
+// The calldata below was "encoded elsewhere" (selector hex + a hand-written
+// argument word) and must lower through the same BLOB path as encodeCall.
+const EXECUTE_42_RAW = `0x${selectorOf('execute(uint256)').slice(2)}${'00'.repeat(31)}2a`;
+
+addFixture(
+  'hl_raw_calldata_call',
+  (() => {
+    const p = createProgram();
+    p.call(CALLER, rawCalldata(EXECUTE_42_RAW));
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  42n,
+);
+
+addFixture(
+  'hl_raw_calldata_reverts',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, rawCalldata(selectorOf('alwaysReverts()')));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// --- Generic return-word access --------------------------------------------------
+// pair() returns (11, 22): word(32) must RDLOAD the SECOND returndata word,
+// and word(64) must hit the real out-of-bounds runtime failure.
+addFixture(
+  'hl_second_return_word',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, encodeCall('pair()')).word(32);
+    return p.toAST();
+  })(),
+  'ok',
+  22n,
+);
+
+addFixture(
+  'hl_return_word_out_of_bounds',
+  (() => {
+    const p = createProgram();
+    p.staticCall(CALLER, encodeCall('pair()')).word(64);
     return p.toAST();
   })(),
   'revert',

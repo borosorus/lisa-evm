@@ -4,11 +4,7 @@ import assert from 'node:assert/strict';
 import {
   add,
   blob,
-  bytesToHex,
-  compile,
-  decode,
   dup,
-  hexToBytes,
   jz,
   jmp,
   label,
@@ -19,7 +15,10 @@ import {
   stop,
   sub,
   swap,
-} from '../src/index.ts';
+} from '../src/api.ts';
+import { bytesToHex, hexToBytes } from '../src/bytes.ts';
+import { compile } from '../src/compile.ts';
+import { decode } from '../src/decode.ts';
 
 test('API builds the README example end to end', () => {
   const p = program(push(2), push(3), add, stop);
