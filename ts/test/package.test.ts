@@ -5,16 +5,19 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * Guards the PACKAGE boundary, not the logic (unit tests cover that): if the
- * package has been built (`npm run build`), the declared entry points must
- * load as plain JavaScript with the documented surface. Skipped otherwise,
- * so `make test-ts` never depends on build artifacts.
+ * package has been built (`npm run build`), imports through the DECLARED
+ * package specifiers ('lisa-tooling', 'lisa-tooling/api') must resolve
+ * through the exports map to working JavaScript with the curated surface.
+ * Skipped otherwise, so `make test-ts` never depends on build artifacts.
  */
 
-const distIndex = new URL('../dist/index.js', import.meta.url);
-const built = existsSync(fileURLToPath(distIndex));
+const built = existsSync(fileURLToPath(new URL('../dist/index.js', import.meta.url)));
+// Runtime-resolution check by design: the non-literal specifier keeps this a
+// pure exports-map resolution test (no build-time dependency on dist/*.d.ts).
+const spec = (s: string): Promise<any> => import(s);
 
-test('built entry point loads and compiles', { skip: !built && 'run `npm run build` first' }, async () => {
-  const lib = await import(distIndex.href);
+test('declared package entry loads and compiles', { skip: !built && 'run `npm run build` first' }, async () => {
+  const lib = await spec('lisa-tooling');
 
   // High-level acceptance program through the package entry.
   const p = lib.createProgram();
@@ -42,8 +45,8 @@ test('built entry point loads and compiles', { skip: !built && 'run `npm run bui
 });
 
 test('deep imports expose the low-level pipeline', { skip: !built && 'run `npm run build` first' }, async () => {
-  const api = await import(new URL('../dist/api.js', import.meta.url).href);
-  const compile = await import(new URL('../dist/compile.js', import.meta.url).href);
+  const api = await spec('lisa-tooling/api');
+  const compile = await spec('lisa-tooling/compile');
   const p = api.program(api.push(2), api.push(3), api.add, api.stop);
   assert.equal(compile.compile(p).hex, '0x010201032400');
 });

@@ -109,8 +109,8 @@ test('rawCalldata accepts pre-encoded calldata verbatim', () => {
   const fromHex = rawCalldata(encoded);
   assert.equal(bytesToHex(fromHex.template), encoded);
   assert.deepEqual(fromHex.patches, []);
-  assert.deepEqual([...rawCalldata(hexToBytes(encoded)).template], [...fromHex.template]);
-  assert.equal(fromHex.signature, undefined); // raw calldata carries no ABI metadata
+  assert.deepEqual(rawCalldata(hexToBytes(encoded)).template, fromHex.template);
+  assert.ok(!('signature' in fromHex), 'raw calldata carries no ABI metadata');
 
   // Empty calldata is representable.
   assert.equal(rawCalldata('0x').template.length, 0);
@@ -132,4 +132,26 @@ test('rawCalldata validates like the byte helpers and stays immutable', () => {
     'use strict';
     (data as { template: unknown }).template = new Uint8Array();
   }, TypeError);
+});
+
+test('calldata bytes are immune to mutation of obtained copies', () => {
+  const raw = rawCalldata('0xdeadbeef');
+  raw.template[0] = 0x00; // mutates a throwaway copy only
+  assert.equal(bytesToHex(raw.template), '0xdeadbeef');
+
+  const abi = encodeCall('noArgs()');
+  abi.template.fill(0xff);
+  assert.equal(bytesToHex(abi.template), selectorOf('noArgs()'));
+});
+
+test('encodeCall keeps required ABI metadata types', () => {
+  const d = encodeCall('transfer(address,uint256)', ['0x' + '11'.repeat(20), 7n]);
+  // These annotations are the compile-time guarantee: AbiCallData metadata
+  // is never widened to optional by the raw-calldata CallData base type.
+  const signature: string = d.signature;
+  const inputs: readonly string[] = d.inputs;
+  const selector: Uint8Array = d.selector;
+  assert.equal(signature, 'transfer(address,uint256)');
+  assert.deepEqual(inputs, ['address', 'uint256']);
+  assert.equal(bytesToHex(selector), '0xa9059cbb');
 });

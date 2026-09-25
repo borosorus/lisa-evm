@@ -27,17 +27,26 @@ export interface AbiPatch {
   readonly bounds?: bigint;
 }
 
-/** Immutable description of one call's calldata. */
+/**
+ * Calldata consumed by every call: the byte template lowered through BLOB
+ * and the runtime patches written into it after the blob copy.
+ */
 export interface CallData {
-  /** ABI signature; absent for pre-encoded raw calldata (see rawCalldata). */
-  readonly signature?: string;
-  /** 4-byte selector; absent for raw calldata, which may carry none. */
-  readonly selector?: Uint8Array; // 4 bytes
-  /** Input type names; absent for raw calldata. */
-  readonly inputs?: readonly string[];
-  /** selector || word0 || word1 ... (constant words inline, holes zeroed) */
+  /**
+   * Exact bytes lowered into the BLOB (for ABI calldata: selector || word0
+   * || ... with constant words inline and patch holes zeroed). JS has no
+   * immutable typed arrays, so each read returns a defensive copy: writing
+   * to an obtained array can never alter a later lowering.
+   */
   readonly template: Uint8Array;
   readonly patches: readonly AbiPatch[];
+}
+
+/** Calldata built by `encodeCall`: a full ABI description alongside the bytes. */
+export interface AbiCallData extends CallData {
+  readonly signature: string;
+  readonly selector: Uint8Array; // 4 bytes
+  readonly inputs: readonly string[];
 }
 
 export type AbiArg = Value | number | bigint | boolean | string | Uint8Array;
@@ -168,7 +177,7 @@ function runtimeBounds(type: TypeSpec): bigint | undefined {
  * Build calldata for `signature(args...)`. Constants are baked into the
  * template; high-level Values become runtime MSTORE patches.
  */
-export function encodeCall(signature: string, args: readonly AbiArg[] = []): CallData {
+export function encodeCall(signature: string, args: readonly AbiArg[] = []): AbiCallData {
   const { types } = parseSignature(signature);
   if (args.length !== types.length) {
     throw new TypeError(
@@ -200,13 +209,16 @@ export function encodeCall(signature: string, args: readonly AbiArg[] = []): Cal
       words.push(constantWord(type, arg, where));
     }
   });
-  return {
+  const template = concat(selector, ...words);
+  return Object.freeze({
     signature,
-    selector,
-    inputs: types,
-    template: concat(selector, ...words),
-    patches,
-  };
+    selector, // derived metadata only; lowering reads the template getter below
+    inputs: Object.freeze([...types]) as readonly string[],
+    get template(): Uint8Array {
+      return template.slice(); // defensive copy; see CallData
+    },
+    patches: Object.freeze(patches.map((patch) => Object.freeze(patch))) as readonly AbiPatch[],
+  });
 }
 
 function isValueLikeHandle(arg: AbiArg): arg is Value {
@@ -229,7 +241,10 @@ export function rawCalldata(bytes: string | Uint8Array): CallData {
   if (template.length > 0xffff) {
     throw new RangeError(`calldata of ${template.length} bytes exceeds the BLOB u16 length limit`);
   }
-  // The descriptor is frozen; JS offers no immutable typed arrays, so the
-  // template follows the same read-only convention as encodeCall output.
-  return Object.freeze({ template, patches: Object.freeze([]) as readonly AbiPatch[] });
+  return Object.freeze({
+    get template(): Uint8Array {
+      return template.slice(); // defensive copy; see CallData
+    },
+    patches: Object.freeze([]) as readonly AbiPatch[],
+  });
 }

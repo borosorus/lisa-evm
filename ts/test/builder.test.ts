@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createProgram, LoweringError, type CallResult, type ProgramBuilder } from '../src/builder.ts';
-import { encodeCall, rawCalldata } from '../src/abi.ts';
+import { encodeCall, rawCalldata, selectorOf } from '../src/abi.ts';
 import { CALLER, context, SELF, TIMESTAMP, Value } from '../src/expr.ts';
 import { decode } from '../src/decode.ts';
 import { hexToBytes } from '../src/bytes.ts';
@@ -173,4 +173,18 @@ test('rawCalldata flows through the same BLOB call path', () => {
   // BLOB with the exact template bytes, then STATICCALL (0x31).
   assert.ok(hex.includes('2d0024a9059cbb' + '11'.repeat(32)));
   assert.ok(hex.includes('31')); // STATICCALL reached, no MSTORE patches emitted
+});
+
+test('mutating exposed calldata bytes cannot alter a later lowering', () => {
+  const raw = rawCalldata('0xcafec0de');
+  raw.template[0] = 0x00; // mutate an obtained copy
+  const abi = encodeCall('noArgs()');
+  abi.template[0] = 0x00;
+
+  const p = createProgram();
+  p.staticCall(CALLER, raw);
+  p.staticCall(CALLER, abi);
+  const hex = p.compile().hex;
+  assert.ok(hex.includes('2d0004cafec0de'), 'raw bytes intact');
+  assert.ok(hex.includes('2d0004' + selectorOf('noArgs()').slice(2)), 'ABI bytes intact');
 });
