@@ -290,6 +290,11 @@ object "LISA" {
 
             // REL FROM PC_
             function jmp_(pc_) -> new_pc {
+                // both rel16 bytes must exist in the program; otherwise the
+                // zero-padded calldataload would read a phantom +0 offset and
+                // a truncated jump could end successfully
+                if lt(calldatasize(), add(pc_, 2)) { invalid() }
+
                 let word := calldataload(pc_)
 
                 let sint16 := shr(240,word)

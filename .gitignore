@@ -2,6 +2,8 @@
 cache/
 out/
 build/
+node_modules/
+ts/dist/
 .DS_Store
 */.DS_Store
 # Ignores development broadcast logs
@@ -11,6 +13,9 @@ build/
 
 # Docs
 docs/
+
+# Agent workflow notes
+QWEN.md
 
 # Dotenv file
 .env

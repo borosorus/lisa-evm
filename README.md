@@ -77,11 +77,106 @@ If LISA is embedded in or delegated to by a smart wallet, the same principle app
 
 `STATICCALL` is available for read-only external execution. A **guest** `DELEGATECALL` instruction is intentionally not part of the current LISA ISA. This is separate from a host wallet using EVM `DELEGATECALL` to invoke the LISA interpreter itself. Guest delegate execution can be added later if a concrete module/storage use case justifies the additional semantics.
 
+## TypeScript toolchain
+
+The `ts/` directory contains the TypeScript toolchain around the runtime. It has two levels of API; both lower into the same AST, compiler, and encoder:
+
+```text
+TypeScript-first API  ->  high-level representation  ->  AST  ->  compiler (labels)  ->  encoder  ->  bytecode  ->  LISA.yul
+createProgram, Values,        program(), push(),       (the builder emits plain
+encodeCall, p.if              add, ...                  AST nodes)
+```
+
+The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
+
+Working inside this repository requires Node.js >= 23.6 (TypeScript is run directly; no build step). The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing. Other TypeScript projects consume `ts/` as a normal built package — see [Using as a package](#using-as-a-package) below.
+
+### TypeScript-first API
+
+`createProgram()` (`ts/src/builder.ts`, with `ts/src/expr.ts` and `ts/src/abi.ts`) writes programs in terms of values and calls instead of a manual stack. The builder maintains a shadow stack and resolves every `DUP`/`SWAP` itself:
+
+```ts
+import { createProgram, encodeCall, SELF } from './ts/src/index.ts';
+
+const p = createProgram();
+
+// STATICCALL with a runtime ABI argument: the SELF placeholder is patched
+// into the copied blob at its word offset, and the returned word is read
+// lazily (RDLOAD) when decoded as uint256().
+const balance = p.staticCall(SELF, encodeCall('balanceOf(address)', [SELF])).uint256();
+
+p.if(balance.gt(1000), () => {
+  // Reusing `balance` inside the branch lowers to the correct DUP depth.
+  p.call(SELF, encodeCall('execute(uint256)', [balance]));
+});
+
+const c = p.compile();  // same compiler and encoder as the AST layer below
+```
+
+This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(...)` with balanced branch joins, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
+
+Calldata encoded elsewhere drops straight into the same call path, and any 32-byte return-data word is readable:
+
+```ts
+p.call(target, rawCalldata('0xa9059cbb...'));        // pre-encoded, no ABI parsing
+
+const result = p.staticCall(target, encodeCall('pair()'));
+const firstWord = result.uint256();                  // word at byte offset 0
+const secondWord = result.word(32);                  // ...or any aligned word
+```
+
+### AST API
+
+The low-level API that the builder lowers into remains fully available:
+
+```ts
+import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop } from './ts/src/api.ts';
+import { compile, disassemble } from './ts/src/index.ts';
+
+// Countdown loop with symbolic labels — no manual jump offsets.
+const p = program(
+  push(0),            // accumulator
+  push(3),            // counter
+  label('head'),
+  dup(1),
+  jz('done'),         // forward label
+  swap(2), push(1), add,
+  swap(2), push(1), sub,
+  jmp('head'),        // backward label
+  label('done'),
+  pop,
+  stop,
+);
+
+const c = compile(p);
+c.hex;                          // 0x0100010322012c000f230201012423020101252b80102100
+disassemble(c.bytes);           // ["PUSH1 0x0", "PUSH1 0x3", ..., "JZ +15 -> 22", ...]
+```
+
+Jumps encode the VM's 16-bit sign-magnitude offsets relative to the operand field (opcode address + 1); the compiler resolves labels, and `encode`/`decode` handle the widths, immediates, and blobs. Byte-level details are exercised in `ts/test/` and executed against the real Yul runtime through generated fixtures (`ts/tools/gen-runtime-fixtures.ts` -> `test/LISATooling.t.sol`).
+
+### Using as a package
+
+`ts/` is also a normal ESM package (`lisa-tooling`). Build it once with `cd ts && npm install && npm run build`, which emits `dist/` JavaScript plus `.d.ts` declarations (no build step is needed by consumers). Depend on it from another project, for example:
+
+```jsonc
+{ "dependencies": { "lisa-tooling": "file:./path/to/lisa-evm/ts" } }
+```
+
+```ts
+import { createProgram, encodeCall, rawCalldata, compile, SELF } from 'lisa-tooling';
+import { program, push, add, stop } from 'lisa-tooling/api'; // low-level AST, deep import
+```
+
+The root entry (`lisa-tooling`) exposes the builder, ABI calldata, `compile`, and the decoder. The lower-level plumbing stays available through documented subpaths — `lisa-tooling/api`, `/ast`, `/encode`, `/isa`, `/bytes` — and equals the `ts/src/<module>.ts` files shown in the examples above. `keccak.ts` is internal; the public `@noble/hashes` dependency is the package's only third-party runtime import, and nothing in the built runtime touches Node, the filesystem, or repository paths (tests and fixture generators may, and are excluded from the package).
+
 ## Build and test
 
 ```bash
 make build       # Compile Solidity harnesses and LISA creation bytecode
-make test        # Recompile, then run offline tests
+make fixtures    # Compile TS fixture programs against the built runtime bytes
+make test        # Recompile, generate fixtures, then run offline tests (incl. TS runtime-compat)
+make test-ts     # Run the TypeScript unit/round-trip tests (node --test)
 make test-opt    # Run the suite against optimized Yul bytecode
 make trace       # Trace the full integration test
 make debug       # Open Forge's debugger on the full integration test
@@ -89,6 +184,8 @@ make snapshot    # Record gas snapshots
 make fmt         # Format Solidity files
 make clean       # Remove Forge and Yul build output
 ```
+
+The TypeScript tests need only Node; `cd ts && npm install` additionally provides `npm run typecheck` (the dev dependencies are `typescript` and `@types/node`; `@noble/hashes` is the toolchain runtime dependency described above). `npm test` is equivalent to `make test-ts`.
 
 Use another test with:
 

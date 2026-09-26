@@ -1,0 +1,37 @@
+{
+  "name": "lisa-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript toolchain for the LISA stack VM: ISA, encoder, disassembler, AST, compiler, labels, and a TypeScript-first program builder",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./isa": { "types": "./dist/isa.d.ts", "default": "./dist/isa.js" },
+    "./bytes": { "types": "./dist/bytes.d.ts", "default": "./dist/bytes.js" },
+    "./encode": { "types": "./dist/encode.d.ts", "default": "./dist/encode.js" },
+    "./decode": { "types": "./dist/decode.d.ts", "default": "./dist/decode.js" },
+    "./ast": { "types": "./dist/ast.d.ts", "default": "./dist/ast.js" },
+    "./compile": { "types": "./dist/compile.d.ts", "default": "./dist/compile.js" },
+    "./api": { "types": "./dist/api.d.ts", "default": "./dist/api.js" },
+    "./expr": { "types": "./dist/expr.d.ts", "default": "./dist/expr.js" },
+    "./abi": { "types": "./dist/abi.d.ts", "default": "./dist/abi.js" },
+    "./builder": { "types": "./dist/builder.d.ts", "default": "./dist/builder.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "fixtures": "node tools/gen-runtime-fixtures.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0"
+  }
+}
