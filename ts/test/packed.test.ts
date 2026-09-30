@@ -87,7 +87,7 @@ test('npm pack produces a clean, intentional artifact', { skip: !built && 'run `
 
   // Identity and metadata a consumer / registry would check.
   const meta = JSON.parse(readFileSync(join(pkgPath, 'package.json'), 'utf8'));
-  assert.equal(meta.name, '@borosorus/lisa-evm');
+  assert.equal(meta.name, '@bosorus/lisa-evm');
   assert.equal(meta.private, undefined, 'not private');
   assert.equal(meta.version, '0.1.0');
   assert.equal(meta.publishConfig?.access, 'public');
@@ -149,7 +149,7 @@ test('packed artifact installs and runs in an isolated consumer', { skip: !built
   // The executing copy must live under the consumer's node_modules.
   const where = execFileSync(
     process.execPath, ['--input-type=module', '-e',
-      "console.log(await import.meta.resolve('@borosorus/lisa-evm'))"],
+      "console.log(await import.meta.resolve('@bosorus/lisa-evm'))"],
     { cwd: consumer, encoding: 'utf8' },
   ).trim();
   // Canonicalize both sides (macOS tmpdirs resolve through /private).
@@ -162,9 +162,9 @@ test('packed declarations typecheck in a consumer', { skip: !built && 'run `npm 
   const { tmp } = packAndUnpack();
   const consumer = installConsumer(tmp, 'consumer-types');
   writeFileSync(join(consumer, 'consumer.ts'), `
-import { createProgram, encodeCall, rawCalldata, compile, SELF, type CompiledProgram } from '@borosorus/lisa-evm';
-import { program, push, add, stop } from '@borosorus/lisa-evm/api';
-import type { Program } from '@borosorus/lisa-evm/ast';
+import { createProgram, encodeCall, rawCalldata, compile, SELF, type CompiledProgram } from '@bosorus/lisa-evm';
+import { program, push, add, stop } from '@bosorus/lisa-evm/api';
+import type { Program } from '@bosorus/lisa-evm/ast';
 
 const p = createProgram();
 const v = p.staticCall(SELF, encodeCall('transfer(address,uint256)', [SELF, 7n])).uint256();
