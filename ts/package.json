@@ -1,5 +1,5 @@
 {
-  "name": "@borosorus/lisa-evm",
+  "name": "@bosorus/lisa-evm",
   "version": "0.1.0",
   "description": "TypeScript SDK for the LISA stack VM: program builder, ABI calldata, AST, compiler, encoder, and disassembler for the LISA runtime",
   "type": "module",
