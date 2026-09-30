@@ -154,7 +154,7 @@ test('packed artifact installs and runs in an isolated consumer', { skip: !built
   ).trim();
   // Canonicalize both sides (macOS tmpdirs resolve through /private).
   const resolved = dirname(fileURLToPath(where));
-  const expected = realpathSync(join(consumer, 'node_modules', '@borosorus', 'lisa-evm', 'dist'));
+  const expected = realpathSync(join(consumer, 'node_modules', '@bosorus', 'lisa-evm', 'dist'));
   assert.ok(realpathSync(resolved) === expected, `resolved ${where} outside consumer`);
 });
 
