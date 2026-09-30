@@ -49,7 +49,7 @@ jobs:
           (cd ts && npm pack --pack-destination "$RUNNER_TEMP" >/dev/null)
           mkdir -p "$RUNNER_TEMP/consumer"
           printf '{"name":"consumer","private":true}\n' > "$RUNNER_TEMP/consumer/package.json"
-          (cd "$RUNNER_TEMP/consumer" && npm install "$RUNNER_TEMP"/borosorus-lisa-evm-*.tgz --no-audit --no-fund --loglevel=error)
+          (cd "$RUNNER_TEMP/consumer" && npm install "$RUNNER_TEMP"/bosorus-lisa-evm-*.tgz --no-audit --no-fund --loglevel=error)
           cp ts/tools/package-smoke.mjs "$RUNNER_TEMP/consumer/smoke.mjs"
           (cd "$RUNNER_TEMP/consumer" && node smoke.mjs)
 
