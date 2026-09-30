@@ -89,14 +89,14 @@ encodeCall, p.if              add, ...                  AST nodes)
 
 The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
 
-Working inside this repository requires Node.js >= 23.6 (TypeScript is run directly; no build step). The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing. Other TypeScript projects consume `ts/` as a normal built package — see [Using as a package](#using-as-a-package) below.
+Working inside this repository requires Node.js >= 23.6 because development tests run TypeScript directly (no build step); the published package itself only needs Node.js >= 22 or a modern browser. The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing. External projects consume the toolchain from npm as [`@borosorus/lisa-evm`](ts/README.md) — see [Using as a package](#using-as-a-package) below. When working inside this repository without installing the package, the same modules are the `ts/src/<module>.ts` files shown in the examples.
 
 ### TypeScript-first API
 
 `createProgram()` (`ts/src/builder.ts`, with `ts/src/expr.ts` and `ts/src/abi.ts`) writes programs in terms of values and calls instead of a manual stack. The builder maintains a shadow stack and resolves every `DUP`/`SWAP` itself:
 
 ```ts
-import { createProgram, encodeCall, SELF } from './ts/src/index.ts';
+import { createProgram, encodeCall, SELF } from '@borosorus/lisa-evm';
 
 const p = createProgram();
 
@@ -130,8 +130,8 @@ const secondWord = result.word(32);                  // ...or any aligned word
 The low-level API that the builder lowers into remains fully available:
 
 ```ts
-import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop } from './ts/src/api.ts';
-import { compile, disassemble } from './ts/src/index.ts';
+import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop } from '@borosorus/lisa-evm/api';
+import { compile, disassemble } from '@borosorus/lisa-evm';
 
 // Countdown loop with symbolic labels — no manual jump offsets.
 const p = program(
@@ -157,18 +157,18 @@ Jumps encode the VM's 16-bit sign-magnitude offsets relative to the operand fiel
 
 ### Using as a package
 
-`ts/` is also a normal ESM package (`lisa-tooling`). Build it once with `cd ts && npm install && npm run build`, which emits `dist/` JavaScript plus `.d.ts` declarations (no build step is needed by consumers). Depend on it from another project, for example:
+The toolchain is published from `ts/` as the public ESM package **`@borosorus/lisa-evm`**. Consumer documentation lives in [`ts/README.md`](ts/README.md):
 
-```jsonc
-{ "dependencies": { "lisa-tooling": "file:./path/to/lisa-evm/ts" } }
+```bash
+npm install @borosorus/lisa-evm
 ```
 
 ```ts
-import { createProgram, encodeCall, rawCalldata, compile, SELF } from 'lisa-tooling';
-import { program, push, add, stop } from 'lisa-tooling/api'; // low-level AST, deep import
+import { createProgram, encodeCall, rawCalldata, compile, decode, disassemble, SELF } from '@borosorus/lisa-evm';
+import { program, push, add, stop } from '@borosorus/lisa-evm/api'; // low-level AST, deep import
 ```
 
-The root entry (`lisa-tooling`) exposes the builder, ABI calldata, `compile`, and the decoder. The lower-level plumbing stays available through documented subpaths — `lisa-tooling/api`, `/ast`, `/encode`, `/isa`, `/bytes` — and equals the `ts/src/<module>.ts` files shown in the examples above. `keccak.ts` is internal; the public `@noble/hashes` dependency is the package's only third-party runtime import, and nothing in the built runtime touches Node, the filesystem, or repository paths (tests and fixture generators may, and are excluded from the package).
+The root entry exposes the builder, ABI calldata, `compile`, and the decoder. The lower-level plumbing stays available through documented subpaths — `@borosorus/lisa-evm/api`, `/ast`, `/compile`, `/encode`, `/decode`, `/isa`, `/bytes`, `/expr`, `/abi`, `/builder` — and equals the `ts/src/<module>.ts` files shown in the examples above. Keccak glue is internal; `@noble/hashes` is the package's only third-party runtime import, and nothing in the built package touches Node builtins, the filesystem, or repository paths, so it runs unmodified in browsers (tests and fixture generators may use Node, and are excluded from the package). The published artifact works on Node.js >= 22 and modern browsers; the Node >= 23.6 requirement is for developing in this repository, not for consuming the package.
 
 ## Build and test
 
