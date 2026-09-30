@@ -1,5 +1,7 @@
-# Forge installs the pinned compiler here. Override SOLC for custom installations.
-SOLC ?= $(HOME)/.svm/0.8.29/solc-0.8.29
+# Forge installs the pinned compiler under ~/.svm (older Foundry) or
+# ~/.local/share/svm (XDG layout, Foundry >= 1.x). Override SOLC for custom
+# installations.
+SOLC ?= $(firstword $(wildcard $(HOME)/.local/share/svm/0.8.29/solc-0.8.29) $(HOME)/.svm/0.8.29/solc-0.8.29)
 YUL_FLAGS ?=
 TEST ?= test_Program_FullIntegration
 
