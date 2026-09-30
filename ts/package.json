@@ -1,9 +1,32 @@
 {
-  "name": "lisa-tooling",
+  "name": "@borosorus/lisa-evm",
   "version": "0.1.0",
-  "private": true,
-  "description": "TypeScript toolchain for the LISA stack VM: ISA, encoder, disassembler, AST, compiler, labels, and a TypeScript-first program builder",
+  "description": "TypeScript SDK for the LISA stack VM: program builder, ABI calldata, AST, compiler, encoder, and disassembler for the LISA runtime",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/borosorus/lisa-evm.git",
+    "directory": "ts"
+  },
+  "homepage": "https://github.com/borosorus/lisa-evm#readme",
+  "bugs": {
+    "url": "https://github.com/borosorus/lisa-evm/issues"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "lisa",
+    "stack-vm",
+    "bytecode",
+    "compiler",
+    "disassembler",
+    "abi",
+    "evm"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,11 +43,12 @@
     "./abi": { "types": "./dist/abi.d.ts", "default": "./dist/abi.js" },
     "./builder": { "types": "./dist/builder.d.ts", "default": "./dist/builder.js" }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
     "fixtures": "node tools/gen-runtime-fixtures.ts"
   },
   "devDependencies": {
