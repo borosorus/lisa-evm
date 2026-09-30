@@ -10,7 +10,7 @@
  * Usage:
  *   node package-smoke.mjs                     from a directory whose
  *                                              node_modules contains
- *                                              @borosorus/lisa-evm
+ *                                              @bosorus/lisa-evm
  *   node package-smoke.mjs --dist <dir>        import <dir>/*.js directly
  *                                              (e.g. a built ts/dist)
  */
@@ -21,7 +21,7 @@ import { resolve } from 'node:path';
 const distIdx = process.argv.indexOf('--dist');
 const base =
   distIdx >= 0 ? pathToFileURL(resolve(process.argv[distIdx + 1]) + '/').href : null;
-const imp = (sub) => import(base ? base + (sub === '.' ? 'index.js' : `${sub}.js`) : `@borosorus/lisa-evm${sub === '.' ? '' : `/${sub}`}`);
+const imp = (sub) => import(base ? base + (sub === '.' ? 'index.js' : `${sub}.js`) : `@bosorus/lisa-evm${sub === '.' ? '' : `/${sub}`}`);
 
 const lib = await imp('.');
 
