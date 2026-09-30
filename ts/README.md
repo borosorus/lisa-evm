@@ -1,4 +1,4 @@
-# @borosorus/lisa-evm
+# @bosorus/lisa-evm
 
 TypeScript SDK for **LISA**, an experimental stack-based virtual machine. This
 package builds LISA programs — a high-level program builder, ABI calldata, an
@@ -15,7 +15,7 @@ package mirrors that ISA; when the two disagree, the Yul runtime is right.
 ## Install
 
 ```bash
-npm install @borosorus/lisa-evm
+npm install @bosorus/lisa-evm
 ```
 
 ESM only. Works in modern browsers (bundlers included) and Node.js >= 22. The
@@ -29,7 +29,7 @@ manual stack; the builder resolves `DUP`/`SWAP` depths and stack cleanup for
 you and raises `LoweringError` rather than emitting broken bytecode:
 
 ```ts
-import { createProgram, encodeCall, SELF } from '@borosorus/lisa-evm';
+import { createProgram, encodeCall, SELF } from '@bosorus/lisa-evm';
 
 const p = createProgram();
 
@@ -45,7 +45,7 @@ Pre-encoded calldata drops straight into the same call path, and any aligned
 32-byte return-data word is readable:
 
 ```ts
-import { createProgram, rawCalldata, SELF } from '@borosorus/lisa-evm';
+import { createProgram, rawCalldata, SELF } from '@bosorus/lisa-evm';
 
 const p = createProgram();
 // transfer(address,uint256) encoded elsewhere — no ABI parsing here.
@@ -58,8 +58,8 @@ const secondWord = result.word(32);             // word at byte offset 32
 ## Inspect bytecode
 
 ```ts
-import { compile, decode, disassemble } from '@borosorus/lisa-evm';
-import { program, push, add, stop } from '@borosorus/lisa-evm/api';
+import { compile, decode, disassemble } from '@bosorus/lisa-evm';
+import { program, push, add, stop } from '@bosorus/lisa-evm/api';
 
 const programBytes = compile(program(push(2), push(3), add, stop)).bytes;
 disassemble(programBytes);   // ["PUSH1 0x2", "PUSH1 0x3", "ADD", "STOP"]
@@ -72,8 +72,8 @@ The AST layer the builder lowers into is available through documented
 subpath imports:
 
 ```ts
-import { program, push, add, stop } from '@borosorus/lisa-evm/api';
-import { compile } from '@borosorus/lisa-evm/compile';
+import { program, push, add, stop } from '@bosorus/lisa-evm/api';
+import { compile } from '@bosorus/lisa-evm/compile';
 
 compile(program(push(2), push(3), add, stop)).hex; // 0x010201032400
 ```
