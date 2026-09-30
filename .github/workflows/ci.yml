@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: TypeScript package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
+      # Development tests run TypeScript directly, hence the >= 23.6 floor.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      # Unit tests plus package-boundary tests (exports map, packed tarball,
+      # isolated consumer, declarations).
+      - run: npm test
+      # Publishable artifact check (prepack rebuilds dist/).
+      - run: npm pack
+
+  consumer-floor:
+    # The published engines floor: pack the artifact, npm-install it into a
+    # fresh consumer, and run the plain-JavaScript smoke on the oldest
+    # maintained Node release — no TypeScript, no repository sources.
+    name: Packed consumer on Node 22
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
+      - run: npm ci
+        working-directory: ts
+      - name: Pack, install, and smoke-test the artifact
+        run: |
+          (cd ts && npm pack --pack-destination "$RUNNER_TEMP" >/dev/null)
+          mkdir -p "$RUNNER_TEMP/consumer"
+          printf '{"name":"consumer","private":true}\n' > "$RUNNER_TEMP/consumer/package.json"
+          (cd "$RUNNER_TEMP/consumer" && npm install "$RUNNER_TEMP"/borosorus-lisa-evm-*.tgz --no-audit --no-fund --loglevel=error)
+          cp ts/tools/package-smoke.mjs "$RUNNER_TEMP/consumer/smoke.mjs"
+          (cd "$RUNNER_TEMP/consumer" && node smoke.mjs)
+
+  runtime-compat:
+    # Compiler output executed against the authoritative Yul runtime:
+    # TS-generated fixtures run inside test/LISATooling.t.sol under Forge.
+    name: Runtime compatibility (Foundry)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
+      # make fixtures runs ts/tools/gen-runtime-fixtures.ts, which needs the
+      # toolchain's own dependency (@noble/hashes) installed.
+      - run: npm ci
+        working-directory: ts
+      # make test: forge build (installs pinned solc 0.8.29 via svm),
+      # Yul compile, fixture generation, offline Forge suite.
+      - run: make test

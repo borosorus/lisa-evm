@@ -4,6 +4,7 @@ out/
 build/
 node_modules/
 ts/dist/
+*.tgz
 .DS_Store
 */.DS_Store
 # Ignores development broadcast logs

@@ -6,12 +6,13 @@
  * (compile), and bytecode introspection (decode). keccak.ts is internal.
  *
  * The lower-level plumbing stays available as documented deep imports:
- *   lisa-tooling/api    - AST node constructors (program, push, add, ...)
- *   lisa-tooling/ast    - AST types (Node, Program, NoOperandOp)
- *   lisa-tooling/encode - the instruction encoder
- *   lisa-tooling/isa    - canonical ISA metadata
- *   lisa-tooling/bytes  - byte/hex helpers
- * (In this repository, import ts/src/<module>.ts instead of the subpath.)
+ *   @borosorus/lisa-evm/api    - AST node constructors (program, push, add, ...)
+ *   @borosorus/lisa-evm/ast    - AST types (Node, Program, NoOperandOp)
+ *   @borosorus/lisa-evm/encode - the instruction encoder
+ *   @borosorus/lisa-evm/isa    - canonical ISA metadata
+ *   @borosorus/lisa-evm/bytes  - byte/hex helpers
+ * (When working inside the lisa-evm repository, import
+ *  ts/src/<module>.ts instead of the subpath.)
  */
 
 export * from './builder.ts';

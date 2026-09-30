@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 /**
  * Guards the PACKAGE boundary, not the logic (unit tests cover that): if the
  * package has been built (`npm run build`), imports through the DECLARED
- * package specifiers ('lisa-tooling', 'lisa-tooling/api') must resolve
- * through the exports map to working JavaScript with the curated surface.
- * Skipped otherwise, so `make test-ts` never depends on build artifacts.
+ * package specifiers ('@borosorus/lisa-evm', '@borosorus/lisa-evm/api') must
+ * resolve through the exports map to working JavaScript with the curated
+ * surface. Skipped otherwise, so `make test-ts` never depends on build
+ * artifacts. test/packed.test.ts covers the packed tarball itself.
  */
 
 const built = existsSync(fileURLToPath(new URL('../dist/index.js', import.meta.url)));
@@ -17,7 +18,7 @@ const built = existsSync(fileURLToPath(new URL('../dist/index.js', import.meta.u
 const spec = (s: string): Promise<any> => import(s);
 
 test('declared package entry loads and compiles', { skip: !built && 'run `npm run build` first' }, async () => {
-  const lib = await spec('lisa-tooling');
+  const lib = await spec('@borosorus/lisa-evm');
 
   // High-level acceptance program through the package entry.
   const p = lib.createProgram();
@@ -45,8 +46,8 @@ test('declared package entry loads and compiles', { skip: !built && 'run `npm ru
 });
 
 test('deep imports expose the low-level pipeline', { skip: !built && 'run `npm run build` first' }, async () => {
-  const api = await spec('lisa-tooling/api');
-  const compile = await spec('lisa-tooling/compile');
+  const api = await spec('@borosorus/lisa-evm/api');
+  const compile = await spec('@borosorus/lisa-evm/compile');
   const p = api.program(api.push(2), api.push(3), api.add, api.stop);
   assert.equal(compile.compile(p).hex, '0x010201032400');
 });
