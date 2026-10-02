@@ -89,7 +89,7 @@ test('npm pack produces a clean, intentional artifact', { skip: !built && 'run `
   const meta = JSON.parse(readFileSync(join(pkgPath, 'package.json'), 'utf8'));
   assert.equal(meta.name, '@bosorus/lisa-evm');
   assert.equal(meta.private, undefined, 'not private');
-  assert.equal(meta.version, '0.1.0');
+  assert.equal(meta.version, '0.2.0');
   assert.equal(meta.publishConfig?.access, 'public');
   assert.equal(typeof meta.repository?.url, 'string');
   assert.equal(meta.scripts?.prepack, 'npm run build', 'prepack rebuilds before pack');
