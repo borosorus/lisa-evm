@@ -5,9 +5,36 @@ import { createProgram, LoweringError, type CallResult, type ProgramBuilder } fr
 import { encodeCall, rawCalldata, selectorOf } from '../src/abi.ts';
 import { CALLER, context, SELF, TIMESTAMP, Value } from '../src/expr.ts';
 import { decode } from '../src/decode.ts';
-import { hexToBytes } from '../src/bytes.ts';
+import { bytesToHex, hexToBytes } from '../src/bytes.ts';
+import { pop as popNode, push, stop } from '../src/api.ts';
+import type { CompiledProgram } from '../src/compile.ts';
 
 const CALL_CD = () => encodeCall('execute(uint256)', [42n]);
+
+/** Byte address of a generated label, by its unique prefix. */
+function labelOf(c: CompiledProgram, prefix: string): number | undefined {
+  const names = [...c.labels.keys()].filter((n) => n.startsWith(prefix));
+  assert.equal(names.length, 1, `exactly one label starting with ${prefix}, got ${[...c.labels.keys()]}`);
+  return c.labels.get(names[0]!);
+}
+
+/** DUP depths in emission order — a read-out of the shadow stack at each use. */
+function dupDepths(p: ProgramBuilder): number[] {
+  return decode(p.compile().bytes)
+    .filter((i) => i.name === 'DUP')
+    .map((i) => i.index!);
+}
+
+/**
+ * POPs beyond the one every call emits to drop its return size, i.e. the pops
+ * that close branch bodies. Counting nodes (not bytes) keeps call guards out.
+ */
+function branchCleanupPops(p: ProgramBuilder): number {
+  const ast = p.toAST();
+  const count = (op: 'POP' | 'CALL' | 'STATICCALL') =>
+    ast.filter((n) => n.kind === 'op' && n.op === op).length;
+  return count('POP') - count('CALL') - count('STATICCALL');
+}
 
 test('hand-lowered gt vector', () => {
   // a > b lowers to LT(b, a): SELF, CALLER, LT, JZ +2 to the auto-appended STOP.
@@ -118,6 +145,243 @@ test('call results from a closed branch are rejected', () => {
     () => leaked!.uint256(),
     (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
   );
+});
+
+test('if without else keeps its current lowering: JZ to the join, no JMP', () => {
+  const p = createProgram();
+  p.if(1, () => {});
+  const c = p.compile();
+  const ins = decode(c.bytes);
+  assert.deepEqual(ins.map((i) => i.name), ['PUSH', 'JZ', 'STOP']);
+  assert.equal(ins[1].target, c.bytes.length - 1); // falls through to the STOP at the join
+  const end = labelOf(c, '__if_end_');
+  assert.equal(end, c.bytes.length - 1);
+  assert.equal(p.toAST().some((n) => n.kind === 'jmp'), false);
+});
+
+test('if/else lowers to JZ else, then, JMP end, else, end', () => {
+  const p = createProgram();
+  p.if(
+    1,
+    () => p.staticCall(CALLER, rawCalldata('0x11111111')),
+    () => p.staticCall(SELF, rawCalldata('0x22222222')),
+  );
+  const c = p.compile();
+  const ins = decode(c.bytes);
+  const other = labelOf(c, '__if_else_');
+  const end = labelOf(c, '__if_end_');
+
+  // Condition, then a JZ whose target is the else label.
+  assert.equal(ins[0].name, 'PUSH');
+  assert.equal(ins[1].name, 'JZ');
+  assert.equal(ins[1].target, other);
+  assert.ok(other! < end! && end === c.bytes.length - 1, 'end is the join, at the auto-appended STOP');
+
+  // The then path exits with a JMP to `end`: the instruction that ends right
+  // at the else label is that JMP (labels are zero-width, so match on
+  // position, not on the resolved target, which later guards can share).
+  const thenExit = ins.filter((i) => i.offset + i.size === other);
+  assert.equal(thenExit.length, 1);
+  assert.equal(thenExit[0].name, 'JMP');
+  assert.equal(thenExit[0].target, end);
+
+  // Bodies sit on the expected side of the else label.
+  const at = (data: string) =>
+    ins.find((i) => i.name === 'BLOB' && bytesToHex(i.data!, false) === data)!.offset;
+  assert.ok(at('11111111') < other!, 'then body before the else label');
+  assert.ok(at('22222222') >= other! && at('22222222') < end!, 'else body between else and end');
+});
+
+test('if/else with empty branches is JZ else, JMP end, end', () => {
+  const p = createProgram();
+  p.if(1, () => {}, () => {});
+  // PUSH1 1, JZ -> 8, JMP -> 8, STOP: with an empty then body both labels
+  // collapse onto the join address, and the JMP still steps over the else.
+  assert.equal(p.compile().hex, '0x01012c00052b000200');
+});
+
+test('both branch bodies join at the stack depth the if entered with', () => {
+  // Only slot references emit DUP here, so the DUP sequence IS the stack
+  // shape at each use: t is deep inside a branch (DUP 2) and one deep again
+  // after the join (DUP 1).
+  const p = createProgram();
+  const t = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+  p.if(
+    t.eq(0),
+    () => {
+      const a = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+      p.if(t.eq(a), () => {});
+    },
+    () => {
+      const b = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+      p.if(t.eq(b), () => {});
+    },
+  );
+  p.if(t.eq(1), () => {});
+  assert.deepEqual(dupDepths(p), [1, 2, 2, 2, 2, 1]);
+  // One cleanup POP per arm, so neither path carries its slot into the join.
+  assert.equal(branchCleanupPops(p), 2);
+});
+
+test('nested if/else keeps stack depths correct at every level', () => {
+  const p = createProgram();
+  const t = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+  p.if(
+    t.eq(0),
+    () => {
+      const a = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+      p.if(
+        a.eq(0),
+        () => {
+          const c = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+          p.if(t.eq(c), () => {});
+        },
+        () => {
+          p.if(t.eq(0), () => {});
+        },
+      );
+    },
+    () => {
+      const d = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+      p.if(t.eq(d), () => {});
+    },
+  );
+  p.if(t.eq(0), () => {});
+  // Depths: outer cond (t) | then: a's cond | inner then: t and c, 3 deep |
+  // inner else: t with a still live | outer else: t and d | join: t alone.
+  assert.deepEqual(dupDepths(p), [1, 1, 3, 2, 2, 2, 2, 1]);
+  // One POP for each of the three branch-local slots (a, c, d); the inner
+  // else-body created none and therefore emits none.
+  assert.equal(branchCleanupPops(p), 3);
+});
+
+test('branch-local values are out of scope after either branch closes', () => {
+  const p = createProgram();
+  let fromThen: Value | undefined;
+  let fromElse: Value | undefined;
+  p.if(
+    1,
+    () => {
+      fromThen = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+    },
+    () => {
+      fromElse = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+    },
+  );
+  for (const leaked of [fromThen!, fromElse!]) {
+    assert.ok(leaked);
+    assert.throws(
+      () => p.if(leaked.eq(0), () => {}),
+      (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+    );
+  }
+  // While a branch is open, its own values are usable.
+  assert.doesNotThrow(() =>
+    p.if(1, () => {
+      const local = p.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+      p.if(local.eq(0), () => {});
+    }),
+  );
+});
+
+test('branch-local call results are out of scope after either branch closes', () => {
+  // Two programs so each leaked result is also the freshest returndata: with a
+  // later call in the other branch, staleness would mask the scope rejection.
+  const CD = rawCalldata('0xdeadbeef');
+
+  const onThen = createProgram();
+  let fromThen: CallResult | undefined;
+  onThen.if(
+    1,
+    () => {
+      fromThen = onThen.staticCall(CALLER, CD);
+    },
+    () => {},
+  );
+  assert.throws(
+    () => fromThen!.uint256(),
+    (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+  );
+
+  const onElse = createProgram();
+  let fromElse: CallResult | undefined;
+  onElse.if(
+    0,
+    () => {},
+    () => {
+      fromElse = onElse.staticCall(CALLER, CD);
+    },
+  );
+  assert.throws(
+    () => fromElse!.uint256(),
+    (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+  );
+
+  // While a branch is open, its own result decodes normally.
+  assert.doesNotThrow(() =>
+    onElse.if(1, () => {
+      onElse.staticCall(CALLER, CD).uint256();
+    }),
+  );
+});
+
+test('return data is tracked per branch path, not per emission order', () => {
+  // The then arm's call never runs on the else path, so a result decoded
+  // before the `if` is still current there; after the join either path may
+  // have replaced it, which is exactly when staleness must bite again.
+  const p = createProgram();
+  const before = p.staticCall(CALLER, CALL_CD());
+  let decodedInElse: Value | undefined;
+  p.if(
+    0,
+    () => {
+      p.staticCall(CALLER, CALL_CD());
+    },
+    () => {
+      decodedInElse = before.uint256();
+    },
+  );
+  assert.ok(decodedInElse, 'the else path decodes the pre-`if` return data');
+  assert.throws(
+    () => before.uint256(),
+    (err: unknown) => err instanceof LoweringError && /stale/.test(`${err}`),
+  );
+
+  // Same result, decoded in the arm that goes on to call: stale from there on.
+  const q = createProgram();
+  const earlier = q.staticCall(CALLER, CALL_CD());
+  q.if(
+    1,
+    () => {
+      earlier.uint256(); // still current
+      q.staticCall(CALLER, CALL_CD());
+      assert.throws(
+        () => earlier.uint256(),
+        (err: unknown) => err instanceof LoweringError && /stale/.test(`${err}`),
+      );
+    },
+    () => {},
+  );
+});
+
+test('emitUnsafe appends raw nodes and the deprecated emit alias forwards', () => {
+  const p = createProgram();
+  p.emitUnsafe(push(7));
+  p.emitUnsafe(stop);
+  assert.equal(p.compile().hex, '0x010700'); // no extra STOP: the last node halted
+
+  const viaAlias = createProgram();
+  viaAlias.emit(push(7));
+  viaAlias.emit(stop);
+  assert.equal(viaAlias.compile().hex, p.compile().hex);
+
+  // Escaped nodes are visible in the AST and untouched by stack accounting:
+  // the POP below never shrinks the shadow, so `t` still duplicates at 1.
+  const q = createProgram();
+  const t = q.staticCall(CALLER, rawCalldata('0xdeadbeef')).uint256();
+  q.emitUnsafe(popNode);
+  q.if(t.eq(0), () => {});
+  assert.equal(dupDepths(q).at(-1), 1);
 });
 
 test('runtime narrow-type arguments get a range guard; full words do not', () => {

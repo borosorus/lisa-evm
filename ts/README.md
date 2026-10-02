@@ -41,6 +41,22 @@ p.if(balance.gt(1000), () => {
 const program = p.compile(); // { bytes: Uint8Array; hex: string; ... }
 ```
 
+`if` takes an optional third argument for the other path. Each branch body is
+its own scope: values it creates are popped before the two paths join, and
+touching one after the branch closed raises `LoweringError`:
+
+```ts
+p.if(
+  balance.gt(1000),
+  () => p.call(SELF, encodeCall('execute(uint256)', [balance])),
+  () => p.call(SELF, encodeCall('queue(uint256)', [balance])),
+);
+```
+
+Return data is tracked per path: a result decoded before the `if` stays readable
+in a branch that makes no later call, and after the join only if neither branch
+called again.
+
 Pre-encoded calldata drops straight into the same call path, and any aligned
 32-byte return-data word is readable:
 
@@ -86,6 +102,11 @@ the root.
 
 ## Notes
 
+- Raw AST nodes go through `emitUnsafe(...nodes)`, the escape hatch around the
+  shadow stack. What it appends must leave every value the builder tracks at the
+  same stack position with the same contents — keeping only the stack depth is
+  not enough — and nothing checks it. The old `emit` name remains as a
+  deprecated alias.
 - Programs are address-free by design: nothing here bakes in chain or runtime
   addresses. How program bytes reach a deployed runtime (calldata, an
   embedding wallet, `DELEGATECALL`) is an execution concern outside this

@@ -220,6 +220,30 @@ function hlConditionalBalanceCall(limit: number): Program {
 addFixture('hl_balance_conditional_call', hlConditionalBalanceCall(1000), 'ok', 1500n, 1500n);
 addFixture('hl_branch_not_taken', hlConditionalBalanceCall(2000), 'ok', 1500n, 0n);
 
+function hlBalanceBranch(limit: number): Program {
+  // if/else where each arm decodes its OWN value (11 or 22 from pair()). Those
+  // slots are branch-local, so the join POPs are load-bearing: the harness tail
+  // reads stack depth 6, which must be `balance` (1500) on either path, never a
+  // word the closed branch left behind.
+  const p = createProgram();
+  const balance = p.staticCall(CALLER, encodeCall('balanceOf(address)', [SELF])).uint256();
+  p.if(
+    balance.gt(limit),
+    () => {
+      const other = p.staticCall(CALLER, encodeCall('pair()')).uint256(); // 11
+      p.call(CALLER, encodeCall('execute(uint256)', [balance.add(other)]));
+    },
+    () => {
+      const other = p.staticCall(CALLER, encodeCall('pair()')).word(32); // 22
+      p.call(CALLER, encodeCall('execute(uint256)', [balance.add(other)]));
+    },
+  );
+  return p.toAST();
+}
+
+addFixture('hl_if_else_then_path', hlBalanceBranch(1000), 'ok', 1500n, 1511n);
+addFixture('hl_if_else_else_path', hlBalanceBranch(2000), 'ok', 1500n, 1522n);
+
 // The emitted range guard must REVERT on an out-of-range runtime address
 // (balance * 2**160 exceeds 2**160 without wrapping), proving the guard path
 // itself, not just its pass-through side.

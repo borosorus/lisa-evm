@@ -117,11 +117,23 @@ export class ProgramBuilder {
   // --- public surface ------------------------------------------------------
 
   /**
-   * Low-level escape hatch: append raw AST nodes. They are NOT reflected in
-   * the shadow stack, so they must be stack-neutral (push+consume balanced).
+   * Low-level escape hatch: append raw AST nodes. The shadow stack is NOT
+   * updated, so what they lower to must leave every builder-tracked slot at the
+   * same position with the same contents — not merely the same stack depth: a
+   * POP plus a PUSH preserves depth and still replaces a value that later DUPs
+   * read. Nothing here checks it, so a mismatch silently desynchronizes every
+   * later DUP/SWAP depth and every slot cleanup. Prefer `if`/`call`/`Value`.
+   */
+  emitUnsafe(...nodes: readonly Node[]): void {
+    for (const node of nodes) this.nodes.push(node);
+  }
+
+  /**
+   * @deprecated Renamed `emitUnsafe`: this method never accounted for the
+   * shadow stack, and the new name says so. Forwards unchanged.
    */
   emit(...nodes: readonly Node[]): void {
-    for (const node of nodes) this.nodes.push(node);
+    this.emitUnsafe(...nodes);
   }
 
   /** STATICCALL with no value transfer. Return data stays live. */
@@ -134,26 +146,33 @@ export class ProgramBuilder {
     return this.emitCall(target, data, value);
   }
 
-  /** Structured conditional: `body` runs when `condition` is non-zero. */
-  if(condition: ValueLike, body: () => void): void {
+  /**
+   * Structured conditional: `thenBody` runs when `condition` is non-zero;
+   * `elseBody`, when given, runs on the other path. Each body is a scope:
+   * slots it creates stay branch-local and are popped before the paths join,
+   * so both reach the join at the entry depth.
+   */
+  if(condition: ValueLike, thenBody: () => void, elseBody?: () => void): void {
     this.materialize(condition); // consumes below via JZ
     const end = this.freshLabel('if_end');
-    this.consume(1, jz(end));
-    const mark = this.shadow.length;
-    const scope = this.nextScope++;
-    this.scopeStack.push(scope);
-    try {
-      body();
-    } finally {
-      this.scopeStack.pop();
+    if (elseBody === undefined) {
+      this.consume(1, jz(end));
+      this.branch(thenBody);
+      this.nodes.push(label(end));
+      return;
     }
-    // Both join paths must reach `end` at the entry depth: discard slots the
-    // body kept alive (the taken path pops them; the fall-through path needs
-    // the POPs too, which is exactly what we emit here).
-    while (this.shadow.length > mark) {
-      this.shadow.pop();
-      this.nodes.push(pop);
-    }
+    const other = this.freshLabel('if_else');
+    this.consume(1, jz(other));
+    // Return data is per-path: the else path never ran the then arm's calls, so
+    // it resumes from the sequence the `if` entered with. At the join a result
+    // stays decodable only if no path replaced it, hence the max.
+    const entry = this.callSeq;
+    this.branch(thenBody);
+    const thenSeq = this.callSeq;
+    this.nodes.push(jmp(end), label(other));
+    this.callSeq = entry;
+    this.branch(elseBody);
+    this.callSeq = Math.max(thenSeq, this.callSeq);
     this.nodes.push(label(end));
   }
 
@@ -231,6 +250,27 @@ export class ProgramBuilder {
     this.nodes.push(jmp(done));
     this.nodes.push(label(fail), revertNode, label(done));
     return new CallResult(this, this.callSeq, this.scopeStack[this.scopeStack.length - 1]!);
+  }
+
+  /**
+   * Emit one branch body in its own scope, then discard the slots it kept
+   * alive so this path reaches the join at the depth it entered with. The POPs
+   * trail the body: the fall-through path runs them, a jump past the body
+   * skips them, and either way the join is balanced.
+   */
+  private branch(body: () => void): void {
+    const mark = this.shadow.length;
+    const scope = this.nextScope++;
+    this.scopeStack.push(scope);
+    try {
+      body();
+    } finally {
+      this.scopeStack.pop();
+    }
+    while (this.shadow.length > mark) {
+      this.shadow.pop();
+      this.nodes.push(pop);
+    }
   }
 
   private materialize(v: ValueLike): void {
