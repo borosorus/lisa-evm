@@ -12,6 +12,10 @@ semantics are defined by the authoritative runtime,
 in the [lisa-evm](https://github.com/borosorus/lisa-evm) repository. This
 package mirrors that ISA; when the two disagree, the Yul runtime is right.
 
+The standalone runtime is deployed on Ethereum mainnet at
+[`0x7F6b058AAF78BC690f781F0914499C460Ff342D9`](https://etherscan.io/address/0x7F6b058AAF78BC690f781F0914499C460Ff342D9);
+send compiled program bytes as calldata to execute them there.
+
 ## Install
 
 ```bash
