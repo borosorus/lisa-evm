@@ -24,6 +24,7 @@ import {
   dup,
   jmp,
   jz,
+  keccak256 as keccakNode,
   label,
   mstore as mstoreNode,
   pop,
@@ -159,6 +160,20 @@ export class ProgramBuilder {
   }
 
   /**
+   * KECCAK256 over bytes carried with the program (`[offset, size] -> [hash]`):
+   * the data travels as a BLOB and is hashed from LISA's virtual memory. Unlike
+   * a context read this is a slot — one copy and one hash per call, so reusing
+   * the Value duplicates the digest instead of re-copying the data and hashing
+   * again. Hashing values that only exist at runtime needs VM memory writes,
+   * which the builder does not expose yet.
+   */
+  keccak(data: Uint8Array | string): Value {
+    this.produce(2, blob(data)); // [offset, len], len on top
+    this.consume(2, keccakNode, 1);
+    return this.captureTop();
+  }
+
+  /**
    * Structured conditional: `thenBody` runs when `condition` is non-zero;
    * `elseBody`, when given, runs on the other path. Each body is a scope:
    * slots it creates stay branch-local and are popped before the paths join,
@@ -186,6 +201,20 @@ export class ProgramBuilder {
     this.branch(elseBody);
     this.callSeq = Math.max(thenSeq, this.callSeq);
     this.nodes.push(label(end));
+  }
+
+  /**
+   * Abort the program unless `condition` is non-zero. Same guard shape the
+   * builder already emits for a failed call, so a violated invariant reverts
+   * instead of leaving a check nobody acted on. LISA's `REVERT` carries no
+   * data; the guard is stack-neutral and costs no slot.
+   */
+  revertUnless(condition: ValueLike): void {
+    const fail = this.freshLabel('revert_fail');
+    const done = this.freshLabel('revert_done');
+    this.materialize(condition); // consumed below via JZ
+    this.consume(1, jz(fail));
+    this.nodes.push(jmp(done), label(fail), revertNode, label(done));
   }
 
   /** The AST so far, without the auto-appended STOP (fixture plumbing). */
@@ -218,6 +247,11 @@ export class ProgramBuilder {
     }
     this.produce(1, push(offset)); // placeholder offset word
     this.nodes.push(rdloadNode); // replaces the top word in place
+    return this.captureTop();
+  }
+
+  /** Register the transient word on top of the stack as a slot of this scope. */
+  private captureTop(): Value {
     const ref: SlotRef = { id: this.nextSlot++, scope: this.scopeStack[this.scopeStack.length - 1]! };
     this.shadow[this.shadow.length - 1] = ref; // transient became persistent
     return new Value({ t: 'slot', id: ref.id, scope: ref.scope, owner: this });

@@ -91,6 +91,25 @@ The address accepts anything word-shaped — a `Value`, a hex address, bytes. Li
 slot: it lowers where the value is used, so a balance checked in a condition
 costs no slot and each use re-reads the account.
 
+An invariant worth aborting on gets a guard, and hashing bytes that travel with
+the program has a direct form:
+
+```ts
+import { createProgram, encodeCall, CALLER, SELF } from '@bosorus/lisa-evm';
+
+const p = createProgram();
+p.revertUnless(p.balance(CALLER).gt(10n ** 18n)); // revert instead of continuing
+const digest = p.keccak('0xdeadbeef');
+p.call(SELF, encodeCall('claim(uint256)', [digest]));
+```
+
+`revertUnless` emits the same `JZ -> REVERT` guard the builder emits for a failed
+call, and costs no slot; LISA's `REVERT` carries no revert data. `keccak` is a
+slot rather than an expression — the data is copied (`BLOB`) and hashed once per
+call, so reusing the `Value` duplicates the digest instead of re-copying and
+re-hashing, and the slot lives until its scope closes. Hashing data that only
+exists at runtime needs LISA's memory API, which the builder does not expose yet.
+
 ## Inspect bytecode
 
 ```ts

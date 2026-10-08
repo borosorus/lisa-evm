@@ -287,6 +287,123 @@ addFixture(
   TEST_ETH_BALANCE,
 );
 
+// --- p.revertUnless(): a violated invariant must stop the program ------------------
+// Same program, one flipped condition: the only difference between these two
+// fixtures is whether the guard holds, so the revert fixture cannot pass on a
+// builder that silently emitted no guard.
+//
+// The branch pair repeats that with a branch-local slot, because the guard's
+// revert path jumps forward past the body's cleanup POPs: what must not happen
+// is either path reaching the join with `balance` buried under a word the
+// closed branch dropped. Reading `balance` after the join therefore pins the
+// join depth from inside the VM, not just in the builder's own accounting.
+
+addFixture(
+  'hl_revert_unless_holds',
+  (() => {
+    const p = createProgram();
+    p.revertUnless(p.balance(CALLER).gt(10n ** 18n)); // the harness holds 7 ETH
+    p.call(CALLER, encodeCall('execute(uint256)', [7n]));
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  7n,
+);
+
+addFixture(
+  'hl_revert_unless_violation_reverts',
+  (() => {
+    const p = createProgram();
+    p.revertUnless(p.balance(CALLER).eq(0n)); // false: CALLER is funded
+    p.call(CALLER, encodeCall('execute(uint256)', [7n]));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// `pair()`'s word lives only in the taken branch. After the join, `balance`
+// must again sit at DUP depth 1, so recording it proves the guard's own jumps
+// and the branch's cleanup POPs agree on one join depth.
+addFixture(
+  'hl_revert_unless_in_branch_holds',
+  (() => {
+    const p = createProgram();
+    const balance = p.staticCall(CALLER, encodeCall('balanceOf(address)', [SELF])).uint256();
+    p.if(
+      balance.gt(1000n),
+      () => {
+        const local = p.staticCall(CALLER, encodeCall('pair()')).uint256(); // 11, branch-local
+        p.revertUnless(local.gt(0n)); // holds
+      },
+      () => {
+        p.call(CALLER, encodeCall('execute(uint256)', [0n]));
+      },
+    );
+    p.call(CALLER, encodeCall('execute(uint256)', [balance])); // read after the join
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  1500n,
+);
+
+// The same guard, violated inside the branch: the program must halt there, so
+// the call after the join never runs and nothing is recorded.
+addFixture(
+  'hl_revert_unless_in_branch_reverts',
+  (() => {
+    const p = createProgram();
+    const balance = p.staticCall(CALLER, encodeCall('balanceOf(address)', [SELF])).uint256();
+    p.if(balance.gt(1000n), () => {
+      p.revertUnless(balance.eq(0n)); // false
+    });
+    p.call(CALLER, encodeCall('execute(uint256)', [balance]));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// --- p.keccak(): the VM's digest must equal the toolchain's ------------------
+// `keccakBytes` is @noble/hashes, an entirely separate Keccak-256
+// implementation from the Yul runtime's, so a disagreement fails visibly.
+const KECCAK_DATA = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+const KECCAK_DIGEST = BigInt(`0x${hex(keccakBytes(KECCAK_DATA))}`);
+
+addFixture(
+  'hl_keccak_digest_is_a_word',
+  (() => {
+    const p = createProgram();
+    p.call(CALLER, encodeCall('execute(uint256)', [p.keccak(KECCAK_DATA)]));
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  KECCAK_DIGEST,
+);
+
+// Hashed once and compared against the digest baked into the program as a
+// literal: the taken arm proves the runtime value is that same 32-byte word.
+addFixture(
+  'hl_keccak_digest_compares_at_runtime',
+  (() => {
+    const p = createProgram();
+    p.if(
+      p.keccak(KECCAK_DATA).eq(KECCAK_DIGEST),
+      () => {
+        p.call(CALLER, encodeCall('execute(uint256)', [5n]));
+      },
+      () => {
+        p.call(CALLER, encodeCall('execute(uint256)', [9n]));
+      },
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  5n,
+);
+
 // The emitted range guard must REVERT on an out-of-range runtime address
 // (balance * 2**160 exceeds 2**160 without wrapping), proving the guard path
 // itself, not just its pass-through side.

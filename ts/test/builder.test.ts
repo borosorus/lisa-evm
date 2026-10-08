@@ -458,10 +458,74 @@ test('a balance Value outlives the branch it was written in and reads where used
   assert.equal(decode(p.compile().bytes).filter((i) => i.name === 'BALANCE').length, 1);
 });
 
+test('revertUnless(cond) emits a stack-neutral revert guard', () => {
+  const p = createProgram();
+  const t = p.staticCall(CALLER, CALL_CD()).uint256();
+  p.revertUnless(t.eq(1));
+  p.revertUnless(1);
+  const c = p.compile();
+  const ins = decode(c.bytes);
+  assert.equal(ins.filter((i) => i.name === 'REVERT').length, 3); // call guard + 2 requires
+  const failLabels = [...c.labels].filter(([name]) => name.startsWith('__revert_fail_'));
+  assert.equal(failLabels.length, 2, 'each revertUnless emitted its guard label');
+  for (const [name, addr] of failLabels) {
+    assert.equal(ins.find((i) => i.offset === addr)!.name, 'REVERT', `${name} lands on a REVERT`);
+  }
+  // Stack-neutral: `t` is still one deep afterwards, and nothing was popped.
+  p.if(t.eq(2), () => {});
+  assert.equal(dupDepths(p).at(-1), 1);
+  assert.equal(branchCleanupPops(p), 0);
+});
+
+test('revertUnless works inside a branch and never leaves a slot behind', () => {
+  const p = createProgram();
+  p.if(1, () => {
+    const local = p.staticCall(CALLER, CALL_CD()).uint256();
+    p.revertUnless(local.gt(0));
+  });
+  assert.equal(branchCleanupPops(p), 1); // only the branch's own slot
+  assert.equal(decode(p.compile().bytes).filter((i) => i.name === 'REVERT').length, 2);
+});
+
+test('keccak(data) hashes inline bytes and reuses the digest as a slot', () => {
+  const p = createProgram();
+  const a = p.keccak('0xdeadbeef');
+  p.if(a.eq(0), () => {});
+  const b = p.keccak(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  p.if(b.eq(0), () => {});
+  p.if(a.eq(b), () => {});
+  const ins = decode(p.compile().bytes);
+  assert.equal(ins.filter((i) => i.name === 'KECCAK256').length, 2, 'exactly one hash per keccak() call');
+  const blobs = ins.filter((i) => i.name === 'BLOB').map((i) => bytesToHex(i.data!, false));
+  assert.deepEqual(blobs, ['deadbeef', 'deadbeef'], 'hex and bytes carry the same data');
+  assert.deepEqual(dupDepths(p), [1, 1, 2, 2], 'three comparisons over two digests: reuse, never re-hash');
+
+  // Each hash holds a slot, so 17 of them is a stack overflow, not a program.
+  const q = createProgram();
+  const keep: Value[] = [];
+  assert.throws(() => {
+    for (let i = 0; i < 17; i++) keep.push(q.keccak('0x00'));
+  }, (err: unknown) => err instanceof LoweringError && /would need 17 slots, maximum is 16/.test(`${err}`));
+});
+
+test('a digest from a closed branch is out of scope and popped at the join', () => {
+  const p = createProgram();
+  let leaked: Value | undefined;
+  p.if(1, () => {
+    leaked = p.keccak('0xc0ffee');
+  });
+  assert.equal(branchCleanupPops(p), 1);
+  assert.throws(
+    () => p.if(leaked!.eq(0), () => {}),
+    (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+  );
+});
+
 test('context() only accepts push-one context opcodes', () => {
   assert.equal(context('SELF').term.t, 'ctx');
-  // BALANCE pops its address, so it is a builder method, not a context Value.
-  for (const op of ['POP', 'ADD', 'STOP', 'REVERT', 'BALANCE'] as const) {
+  // BALANCE pops its address and KECCAK256 pops a range: both are builder
+  // methods (p.balance, p.keccak), not context Values.
+  for (const op of ['POP', 'ADD', 'STOP', 'REVERT', 'BALANCE', 'KECCAK256'] as const) {
     assert.throws(() => context(op), TypeError, op);
   }
 });
