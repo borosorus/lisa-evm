@@ -18,6 +18,10 @@ contract LISAToolingTest is Test {
 
     /// Returned by the balanceOf mock below; mirrors TEST_BALANCE in the TS generator.
     uint256 public constant TEST_BALANCE = 1500;
+    /// ETH held by this contract; mirrors TEST_ETH_BALANCE in the TS generator.
+    /// Programs read it through BALANCE(CALLER), so the opcode's operand path is
+    /// checked against a real, non-zero balance rather than a mock return value.
+    uint256 public constant TEST_ETH_BALANCE = 7 ether;
     uint256 public recordedAmount;
 
     function setUp() public {
@@ -28,6 +32,9 @@ contract LISAToolingTest is Test {
         }
         require(deployed != address(0), "Deployment failed");
         target = deployed;
+        // This contract is CALLER of every fixture program; the runtime itself
+        // stays unfunded, so SELFBALANCE and BALANCE cannot be confused.
+        vm.deal(address(this), TEST_ETH_BALANCE);
     }
 
     function test_Fixtures_GeneratedPrograms() public {

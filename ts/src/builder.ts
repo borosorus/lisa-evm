@@ -18,6 +18,7 @@
 import type { Node, NoOperandOp } from './ast.ts';
 import {
   add,
+  balance as balanceNode,
   blob,
   call as callNode,
   dup,
@@ -144,6 +145,17 @@ export class ProgramBuilder {
   /** CALL; `value` (default 0) is the LISA value-transfer word. */
   call(target: AddressLike, data: CallData, value: ValueLike = 0n): CallResult {
     return this.emitCall(target, data, value);
+  }
+
+  /**
+   * ETH balance of any account (`BALANCE`: `[address] -> [balance]`). Like the
+   * other context reads (`GAS`, `SELFBALANCE`, `TIMESTAMP`) this is an
+   * expression, not a stack slot: it lowers where it is consumed, so a balance
+   * used only in an `if` condition costs no slot at all — and each use re-reads
+   * the account instead of reporting an earlier reading.
+   */
+  balance(address: AddressLike): Value {
+    return new Value({ t: 'balance', address: toValue(address) });
   }
 
   /**
@@ -281,6 +293,12 @@ export class ProgramBuilder {
         break;
       case 'ctx':
         this.produce(1, opNode(term.op));
+        break;
+      case 'balance':
+        // The one context read with an operand: like `ctx`, it costs a stack
+        // slot only transiently, so it lowers wherever it is consumed.
+        this.materialize(term.address);
+        this.consume(1, balanceNode, 1);
         break;
       case 'bin': {
         if (term.kind === 'gt') {

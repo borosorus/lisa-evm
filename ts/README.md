@@ -75,6 +75,22 @@ const result = p.staticCall(SELF, rawCalldata('0xc45a815d'));
 const secondWord = result.word(32);             // word at byte offset 32
 ```
 
+An account's ETH balance needs no call and no contract in between:
+
+```ts
+import { createProgram, encodeCall, CALLER, SELF } from '@bosorus/lisa-evm';
+
+const p = createProgram();
+p.if(p.balance(CALLER).gt(10n ** 18n), () => {
+  p.call(SELF, encodeCall('settle()'));
+});
+```
+
+The address accepts anything word-shaped — a `Value`, a hex address, bytes. Like
+`GAS` and `SELFBALANCE`, `p.balance(...)` is an expression rather than a stack
+slot: it lowers where the value is used, so a balance checked in a condition
+costs no slot and each use re-reads the account.
+
 ## Inspect bytecode
 
 ```ts

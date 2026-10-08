@@ -244,6 +244,49 @@ function hlBalanceBranch(limit: number): Program {
 addFixture('hl_if_else_then_path', hlBalanceBranch(1000), 'ok', 1500n, 1511n);
 addFixture('hl_if_else_else_path', hlBalanceBranch(2000), 'ok', 1500n, 1522n);
 
+// --- p.balance() against a real ETH balance ------------------------------------
+// LISAToolingTest funds itself with TEST_ETH_BALANCE in setUp and is CALLER of
+// every program, so BALANCE's operand path is checked against a real non-zero
+// balance. The runtime holds no ETH, which keeps BALANCE distinguishable from
+// SELFBALANCE, and the mocks never return this number, which keeps it
+// distinguishable from a decoded call result.
+const TEST_ETH_BALANCE = 7n * 10n ** 18n; // mirrors LISAToolingTest.TEST_ETH_BALANCE
+
+addFixture(
+  'hl_balance_of_caller',
+  (() => {
+    const p = createProgram();
+    p.call(CALLER, encodeCall('execute(uint256)', [p.balance(CALLER)]));
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  TEST_ETH_BALANCE,
+);
+
+// Condition and body read the balance separately (an expression, not a slot),
+// so the taken path must record the true balance and the not-taken arm's zero
+// must not reach execute().
+addFixture(
+  'hl_balance_in_branch',
+  (() => {
+    const p = createProgram();
+    p.if(
+      p.balance(CALLER).gt(TEST_ETH_BALANCE / 2n),
+      () => {
+        p.call(CALLER, encodeCall('execute(uint256)', [p.balance(CALLER)]));
+      },
+      () => {
+        p.call(CALLER, encodeCall('execute(uint256)', [0n]));
+      },
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  TEST_ETH_BALANCE,
+);
+
 // The emitted range guard must REVERT on an out-of-range runtime address
 // (balance * 2**160 exceeds 2**160 without wrapping), proving the guard path
 // itself, not just its pass-through side.

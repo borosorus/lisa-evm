@@ -404,9 +404,64 @@ test('runtime narrow-type arguments get a range guard; full words do not', () =>
   assert.equal(reverts(wide.compile().hex), 1); // call guard only
 });
 
+test('balance(address) lowers to the address then BALANCE at each use', () => {
+  const p = createProgram();
+  const bal = p.balance('0x1111111111111111111111111111111111111111');
+  p.if(bal.eq(0), () => {});
+  p.if(bal.eq(1), () => {});
+  const ins = decode(p.compile().bytes);
+  assert.deepEqual(ins.slice(0, 2).map((i) => i.name), ['PUSH', 'BALANCE']);
+  assert.equal(ins[0].size, 21, 'a 20-byte address lowers to PUSH20');
+  // Like GAS or SELFBALANCE: an expression emitted where it is consumed, so two
+  // uses mean two reads and a stack that never held the balance.
+  assert.equal(ins.filter((i) => i.name === 'BALANCE').length, 2);
+  assert.equal(ins.some((i) => i.name === 'DUP'), false);
+});
+
+test('balance accepts a literal, a context Value, or a decoded address', () => {
+  const p = createProgram();
+  const own = p.balance(SELF);
+  const other = p.balance('0x2222222222222222222222222222222222222222');
+  p.if(own.lt(other), () => {});
+  const ins = decode(p.compile().bytes);
+  assert.deepEqual(ins.slice(0, 5).map((i) => i.name), ['SELF', 'BALANCE', 'PUSH', 'BALANCE', 'LT']);
+  assert.deepEqual(dupDepths(p), [], 'two balances in one comparison, zero slots');
+
+  const q = createProgram();
+  const who = q.staticCall(CALLER, CALL_CD()).uint256();
+  q.if(q.balance(who).gt(0), () => {}); // an address that only exists at runtime
+  const qNames = decode(q.compile().bytes).map((i) => i.name);
+  const read = qNames.indexOf('BALANCE');
+  assert.ok(read > 0 && qNames[read - 1] === 'DUP', 'the address slot is duplicated into BALANCE');
+});
+
+test('balance costs no stack slot, so repeated checks cannot exhaust the stack', () => {
+  const p = createProgram();
+  for (let i = 0; i < 17; i++) p.if(p.balance(SELF).gt(0), () => {});
+  assert.doesNotThrow(() => p.compile());
+  // The same reads held as decoded values do fail, which is what makes the
+  // expression form load-bearing rather than cosmetic.
+  const q = createProgram();
+  const keep: Value[] = [];
+  assert.throws(() => {
+    for (let i = 0; i < 17; i++) keep.push(q.staticCall(CALLER, CALL_CD()).uint256());
+  }, (err: unknown) => err instanceof LoweringError && /would need 17 slots, maximum is 16/.test(`${err}`));
+});
+
+test('a balance Value outlives the branch it was written in and reads where used', () => {
+  const p = createProgram();
+  let later: Value | undefined;
+  p.if(1, () => {
+    later = p.balance(SELF); // describing the read emits nothing
+  });
+  assert.doesNotThrow(() => p.if(later!.gt(0), () => {}));
+  assert.equal(decode(p.compile().bytes).filter((i) => i.name === 'BALANCE').length, 1);
+});
+
 test('context() only accepts push-one context opcodes', () => {
   assert.equal(context('SELF').term.t, 'ctx');
-  for (const op of ['POP', 'ADD', 'STOP', 'REVERT'] as const) {
+  // BALANCE pops its address, so it is a builder method, not a context Value.
+  for (const op of ['POP', 'ADD', 'STOP', 'REVERT', 'BALANCE'] as const) {
     assert.throws(() => context(op), TypeError, op);
   }
 });

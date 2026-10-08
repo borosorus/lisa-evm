@@ -4,9 +4,11 @@
  * A Value is a lazily-emitted description of a word that exists when LISA
  * executes — never a JavaScript number. Two natures:
  *
- * - expression terms (literal, context opcode, binary op) are PURE: they
- *   emit their instructions whenever they are consumed, and cost a stack
- *   slot only transiently;
+ * - expression terms (literal, context opcode, balance read, binary op) are
+ *   PURE: they emit their instructions whenever they are consumed, and cost a
+ *   stack slot only transiently. The world reads among them (GAS, TIMESTAMP,
+ *   SELFBALANCE, BALANCE) therefore observe the chain at each use rather than
+ *   reporting one fixed reading;
  * - slot terms are decoded return data: they occupy a real stack slot for
  *   their scope's lifetime, and reuse emits DUP at the correct position
  *   (computed by the builder against its shadow stack).
@@ -22,6 +24,8 @@ export type BinKind = 'add' | 'sub' | 'mul' | 'div' | 'lt' | 'gt' | 'eq';
 export type ValueTerm =
   | { readonly t: 'lit'; readonly value: bigint }
   | { readonly t: 'ctx'; readonly op: NoOperandOp }
+  /** BALANCE of an address that is itself only known at runtime. */
+  | { readonly t: 'balance'; readonly address: Value }
   | { readonly t: 'bin'; readonly kind: BinKind; readonly lhs: Value; readonly rhs: Value }
   | { readonly t: 'slot'; readonly id: number; readonly scope: number; readonly owner: object };
 
