@@ -204,6 +204,8 @@ The included deployment script is useful for local testing and for deployments t
 
 The standalone runtime is deployed on Ethereum mainnet (chain ID 1) at [`0x7F6b058AAF78BC690f781F0914499C460Ff342D9`](https://etherscan.io/address/0x7F6b058AAF78BC690f781F0914499C460Ff342D9). Send compiled LISA program bytes directly as calldata to execute them. [Deployment transaction](https://etherscan.io/tx/0x60e557ae7b119a8d34ae1e9102c966b6c559e123e25daed4fff5de7b370af750).
 
+The standalone runtime is also deployed on Sepolia (chain ID 11155111) at [`0x8f024da6317209Eb756f34D3D489A5b4de6152DC`](https://sepolia.etherscan.io/address/0x8f024da6317209Eb756f34D3D489A5b4de6152DC).
+
 Simulate deployment locally without an RPC:
 
 ```bash
