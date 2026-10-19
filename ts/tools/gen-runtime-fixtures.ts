@@ -428,6 +428,97 @@ addFixture(
   'revert',
 );
 
+addFixture(
+  'hl_failed_checked_call_reverts',
+  (() => {
+    const p = createProgram();
+    p.call(CALLER, encodeCall('alwaysReverts()'));
+    return p.toAST();
+  })(),
+  'revert',
+);
+
+// Recoverable calls expose a runtime flag and select the corresponding arm.
+addFixture(
+  'hl_try_static_call_success_arm',
+  (() => {
+    const p = createProgram();
+    const result = p.tryStaticCall(CALLER, encodeCall('pair()'));
+    p.if(
+      result.success,
+      () => p.call(CALLER, encodeCall('execute(uint256)', [11n])),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [22n])),
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  11n,
+);
+
+addFixture(
+  'hl_try_static_call_decodes_return_data',
+  (() => {
+    const p = createProgram();
+    const result = p.tryStaticCall(CALLER, encodeCall('pair()'));
+    p.if(
+      result.word(32).eq(22n),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [22n])),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [0n])),
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  22n,
+);
+
+addFixture(
+  'hl_try_call_failure_arm',
+  (() => {
+    const p = createProgram();
+    const result = p.tryCall(CALLER, encodeCall('alwaysReverts()'));
+    p.if(
+      result.success,
+      () => p.call(CALLER, encodeCall('execute(uint256)', [11n])),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [22n])),
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  22n,
+);
+
+// The failed call's Error(string) returndata is still present and RDLOAD-able.
+// Its first word is the Error(string) selector followed by zero padding.
+addFixture(
+  'hl_try_call_reads_revert_data',
+  (() => {
+    const p = createProgram();
+    const result = p.tryStaticCall(CALLER, encodeCall('alwaysReverts()'));
+    p.if(
+      result.word(0).eq(0x08c379a0n << 224n),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [33n])),
+      () => p.call(CALLER, encodeCall('execute(uint256)', [44n])),
+    );
+    return p.toAST();
+  })(),
+  'ok',
+  undefined,
+  33n,
+);
+
+addFixture(
+  'hl_try_call_short_returndata_decode_reverts',
+  (() => {
+    const p = createProgram();
+    p.tryStaticCall(CALLER, encodeCall('emptyReturn()')).uint256();
+    return p.toAST();
+  })(),
+  'revert',
+);
+
 // Baseline: calling emptyReturn() itself SUCCEEDS (its guard passes). Only
 // the decode below can turn the same call into a revert, which pins the
 // revert on the RDLOAD-out-of-returndata path rather than a failed call.

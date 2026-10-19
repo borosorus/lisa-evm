@@ -11,8 +11,9 @@
  * Call convention on the real stack (see yul/LISA.yul):
  *   CALL       pops [target, value, offset, len], pushes [rdsize, success]
  *   STATICCALL pops [target, offset, len],       pushes [rdsize, success]
- * Failed calls revert via a generated JZ -> REVERT guard; scalar decoding
- * uses PUSH offset; RDLOAD (which replaces the stack top in place).
+ * Checked calls revert via a generated JZ -> REVERT guard; try-calls keep the
+ * success word as a builder slot. Scalar decoding uses PUSH offset; RDLOAD
+ * (which replaces the stack top in place).
  */
 
 import type { Node, NoOperandOp } from './ast.ts';
@@ -32,6 +33,7 @@ import {
   rdload as rdloadNode,
   revert as revertNode,
   staticcall as staticcallNode,
+  swap,
   stop as stopNode,
 } from './api.ts';
 import { compile, type CompiledProgram } from './compile.ts';
@@ -57,7 +59,7 @@ interface SlotRef {
   readonly scope: number;
 }
 
-/** Opaque handle to a completed call's (checked) return data. */
+/** Opaque handle to a completed call's return data. */
 export class CallResult {
   readonly builder: ProgramBuilder;
   readonly seq: number;
@@ -91,6 +93,16 @@ export class CallResult {
   }
   bool(): Value {
     return this.word(0);
+  }
+}
+
+/** Result of a recoverable call, with its runtime success flag kept as a slot. */
+export class TryCallResult extends CallResult {
+  readonly success: Value;
+
+  constructor(builder: ProgramBuilder, seq: number, scope: number, success: Value) {
+    super(builder, seq, scope);
+    this.success = success;
   }
 }
 
@@ -146,6 +158,16 @@ export class ProgramBuilder {
   /** CALL; `value` (default 0) is the LISA value-transfer word. */
   call(target: AddressLike, data: CallData, value: ValueLike = 0n): CallResult {
     return this.emitCall(target, data, value);
+  }
+
+  /** STATICCALL that keeps running and exposes the runtime success flag. */
+  tryStaticCall(target: AddressLike, data: CallData): TryCallResult {
+    return this.emitCall(target, data, undefined, true);
+  }
+
+  /** CALL that keeps running and exposes the runtime success flag. */
+  tryCall(target: AddressLike, data: CallData, value: ValueLike = 0n): TryCallResult {
+    return this.emitCall(target, data, value, true);
   }
 
   /**
@@ -257,7 +279,14 @@ export class ProgramBuilder {
     return new Value({ t: 'slot', id: ref.id, scope: ref.scope, owner: this });
   }
 
-  private emitCall(target: AddressLike, data: CallData, value: ValueLike | undefined): CallResult {
+  private emitCall(target: AddressLike, data: CallData, value: ValueLike | undefined): CallResult;
+  private emitCall(target: AddressLike, data: CallData, value: ValueLike | undefined, recoverable: true): TryCallResult;
+  private emitCall(
+    target: AddressLike,
+    data: CallData,
+    value: ValueLike | undefined,
+    recoverable = false,
+  ): CallResult | TryCallResult {
     this.materialize(target);
     if (value !== undefined) this.materialize(value);
     this.produce(2, blob(data.template)); // pushes [offset, len], len on top
@@ -288,6 +317,16 @@ export class ProgramBuilder {
     this.consume(isStatic ? 3 : 4, isStatic ? staticcallNode : callNode, 2);
     this.callSeq += 1;
 
+    const scope = this.scopeStack[this.scopeStack.length - 1]!;
+    if (recoverable) {
+      // [rdsize, success] -> [success]. Both words are transient, so the swap
+      // does not disturb any persistent slots below the call result.
+      this.nodes.push(swap(2));
+      this.consume(1, pop);
+      const success = this.captureTop();
+      return new TryCallResult(this, this.callSeq, scope, success);
+    }
+
     // [rdsize, success] -> fail fast on failure, keep no slots.
     const fail = this.freshLabel('call_fail');
     const done = this.freshLabel('call_done');
@@ -295,7 +334,7 @@ export class ProgramBuilder {
     this.consume(1, pop); // discards rdsize
     this.nodes.push(jmp(done));
     this.nodes.push(label(fail), revertNode, label(done));
-    return new CallResult(this, this.callSeq, this.scopeStack[this.scopeStack.length - 1]!);
+    return new CallResult(this, this.callSeq, scope);
   }
 
   /**

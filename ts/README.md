@@ -42,6 +42,13 @@ p.if(balance.gt(1000), () => {
   p.call(SELF, encodeCall('execute(uint256)', [balance]));
 });
 
+const attempt = p.tryCall(SELF, encodeCall('claim()'));
+p.if(
+  attempt.success,
+  () => p.call(SELF, encodeCall('recordSuccess()')),
+  () => p.call(SELF, encodeCall('recordFailure()')),
+);
+
 const program = p.compile(); // { bytes: Uint8Array; hex: string; ... }
 ```
 
@@ -57,9 +64,16 @@ p.if(
 );
 ```
 
-Return data is tracked per path: a result decoded before the `if` stays readable
-in a branch that makes no later call, and after the join only if neither branch
-called again.
+`call()` and `staticCall()` are checked: a failed external call reverts the
+LISA program. `tryCall()` and `tryStaticCall()` continue and return a
+`TryCallResult`; its `success` is a runtime `Value` that works with `p.if`,
+`revertUnless`, and other value operations. The flag occupies a stack slot until
+its scope closes. Return data remains tracked per path: a result decoded before
+the `if` stays readable in a branch that makes no later call, and after the join
+only if neither branch called again. A later call does not invalidate an
+already captured `success` value. Failed calls may still return revert data;
+callers must not assume that failed-call returndata is a successful ABI return
+value.
 
 Pre-encoded calldata drops straight into the same call path, and any aligned
 32-byte return-data word is readable:

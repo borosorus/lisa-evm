@@ -110,10 +110,19 @@ p.if(balance.gt(1000), () => {
   p.call(SELF, encodeCall('execute(uint256)', [balance]));
 });
 
+// Checked calls revert the LISA program on external failure. Use tryCall or
+// tryStaticCall to branch on a runtime success Value and keep executing.
+const attempt = p.tryCall(SELF, encodeCall('claim()'));
+p.if(
+  attempt.success,
+  () => p.call(SELF, encodeCall('recordSuccess()')),
+  () => p.call(SELF, encodeCall('recordFailure()')),
+);
+
 const c = p.compile();  // same compiler and encoder as the AST layer below
 ```
 
-This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, any account's `p.balance(addr)`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), automatic call-success handling and stack cleanup (a failed call reverts the program), structured `p.if(condition, then, else?)` whose branch bodies are scopes (values created inside one are popped before the join and rejected after it), `p.revertUnless(condition)` to abort on a violated invariant through the same revert guard a failed call gets, `p.keccak(bytes)` to hash data carried with the program, `emitUnsafe` as the raw-AST escape hatch for stack-neutral emission, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode.
+This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, any account's `p.balance(addr)`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), checked `call`/`staticCall` methods that revert the LISA program on failure, recoverable `tryCall`/`tryStaticCall` methods whose `result.success` is a runtime `Value` for `p.if(result.success, then, else?)`, structured branches whose local values are popped before the join, `p.revertUnless(condition)` to abort on a violated invariant, `p.keccak(bytes)` to hash data carried with the program, `emitUnsafe` as the raw-AST escape hatch for stack-neutral emission, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode. Failed calls can still return revert data; do not interpret it as a successful ABI return value. A captured success value remains usable after a later call, while earlier returndata reads become stale.
 
 Calldata encoded elsewhere drops straight into the same call path, and any 32-byte return-data word is readable:
 

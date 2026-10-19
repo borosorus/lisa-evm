@@ -34,10 +34,15 @@ test('declared package entry loads and compiles', { skip: !built && 'run `npm ru
   assert.equal(raw.patches.length, 0);
   const q = lib.createProgram();
   q.staticCall(lib.SELF, raw).word(32);
+  const attempted = q.tryStaticCall(lib.SELF, raw);
+  assert.ok(attempted.success instanceof lib.Value);
+  q.if(attempted.success, () => {});
+  const sent = q.tryCall(lib.SELF, raw);
+  q.if(sent.success, () => {});
   assert.ok(q.compile().hex.includes('012032'));
 
   // Curated surface: builder/abi/expr/compile/decode present, plumbing absent.
-  for (const name of ['createProgram', 'encodeCall', 'rawCalldata', 'selectorOf', 'compile', 'decode', 'disassemble', 'SELF', 'Value', 'LoweringError']) {
+  for (const name of ['createProgram', 'encodeCall', 'rawCalldata', 'selectorOf', 'compile', 'decode', 'disassemble', 'SELF', 'Value', 'LoweringError', 'CallResult', 'TryCallResult']) {
     assert.ok(name in lib, `index exports ${name}`);
   }
   for (const name of ['program', 'push', 'mstore', 'keccakBytes']) {

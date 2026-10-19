@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createProgram, LoweringError, type CallResult, type ProgramBuilder } from '../src/builder.ts';
+import { createProgram, LoweringError, type CallResult, type ProgramBuilder, TryCallResult } from '../src/builder.ts';
 import { encodeCall, rawCalldata, selectorOf } from '../src/abi.ts';
 import { CALLER, context, SELF, TIMESTAMP, Value } from '../src/expr.ts';
 import { decode } from '../src/decode.ts';
@@ -131,6 +131,72 @@ test('CALL default value is PUSH1 0 and explicit values materialize', () => {
   // first CALL: CALLER PUSH0 BLOB...; second: CALLER TIMESTAMP BLOB...
   assert.ok(hex.includes('3401002d0024'));
   assert.ok(hex.includes('34382d0024')); // second: CALLER TIMESTAMP(0x38) BLOB...
+});
+
+test('try calls preserve success as a reusable runtime slot without a failure guard', () => {
+  const p = createProgram();
+  const first = p.tryStaticCall(CALLER, rawCalldata('0xdeadbeef'));
+  const second = p.tryCall(CALLER, rawCalldata('0xdeadbeef'), TIMESTAMP);
+
+  assert.ok(first instanceof TryCallResult);
+  assert.ok(first.success instanceof Value);
+  assert.ok(second.success instanceof Value);
+  p.if(first.success, () => {});
+  p.revertUnless(second.success.eq(1));
+  p.if(first.success, () => {}); // the earlier flag survives the newer call
+
+  const instructions = decode(p.compile().bytes);
+  const names = instructions.map((instruction) => instruction.name);
+  assert.equal(names.filter((name) => name === 'STATICCALL').length, 1);
+  assert.equal(names.filter((name) => name === 'CALL').length, 1);
+  assert.equal(names.filter((name) => name === 'REVERT').length, 1); // only revertUnless
+  assert.equal(names.filter((name) => name === 'JZ').length, 3); // if, revertUnless, if
+  const swaps = instructions.filter((instruction) => instruction.name === 'SWAP');
+  assert.deepEqual(swaps.map((instruction) => instruction.index), [2, 2]);
+  assert.ok(instructions.some((instruction) => instruction.name === 'DUP' && instruction.index === 2));
+  assert.ok(instructions.some((instruction) => instruction.name === 'DUP' && instruction.index === 1));
+
+  // Every call's size is removed before the next instruction, leaving only
+  // its success slot for later DUPs.
+  const ast = p.toAST();
+  for (let i = 0; i < ast.length; i++) {
+    const node = ast[i];
+    if (node?.kind === 'op' && (node.op === 'CALL' || node.op === 'STATICCALL')) {
+      assert.equal(ast[i + 1]?.kind, 'swap');
+      assert.equal(ast[i + 2]?.kind, 'op');
+      assert.equal((ast[i + 2] as { op?: string }).op, 'POP');
+    }
+  }
+});
+
+test('try-call returndata has normal staleness and branch scope rules', () => {
+  const p = createProgram();
+  const result = p.tryStaticCall(CALLER, rawCalldata('0xdeadbeef'));
+  const success = result.success;
+  p.tryCall(CALLER, rawCalldata('0xdeadbeef'));
+  assert.throws(() => result.word(0), (err: unknown) => err instanceof LoweringError && /stale/.test(`${err}`));
+  p.if(success, () => {}); // call sequence does not invalidate the captured flag
+
+  let branchSuccess: Value | undefined;
+  p.if(1, () => {
+    p.if(1, () => {
+      branchSuccess = p.tryStaticCall(CALLER, rawCalldata('0xdeadbeef')).success;
+    });
+  });
+  assert.throws(
+    () => p.if(branchSuccess!, () => {}),
+    (err: unknown) => err instanceof LoweringError && /out of scope/.test(`${err}`),
+  );
+
+  const nested = createProgram();
+  const persistent = nested.tryStaticCall(CALLER, rawCalldata('0xdeadbeef')).success;
+  nested.if(persistent, () => {
+    nested.if(persistent, () => {
+      nested.tryStaticCall(CALLER, rawCalldata('0xdeadbeef')).success;
+    });
+  });
+  nested.if(persistent, () => {});
+  assert.doesNotThrow(() => nested.compile()); // nested local slots clean up at both joins
 });
 
 test('call results from a closed branch are rejected', () => {

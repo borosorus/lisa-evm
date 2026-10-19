@@ -70,6 +70,10 @@ const raw = lib.rawCalldata('0xdeadbeef');
 assert.equal(raw.patches.length, 0);
 const q = lib.createProgram();
 q.staticCall(lib.SELF, raw).word(32);
+const attempt = q.tryStaticCall(lib.SELF, raw);
+if (!(attempt.success instanceof lib.Value)) throw new Error('success is not a LISA Value');
+q.if(attempt.success, () => {});
+q.if(q.tryCall(lib.SELF, raw).success, () => {});
 assert.ok(q.compile().hex.includes('012032'));
 
 // Round trip through the documented low-level pipeline.

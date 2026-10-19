@@ -89,7 +89,7 @@ test('npm pack produces a clean, intentional artifact', { skip: !built && 'run `
   const meta = JSON.parse(readFileSync(join(pkgPath, 'package.json'), 'utf8'));
   assert.equal(meta.name, '@bosorus/lisa-evm');
   assert.equal(meta.private, undefined, 'not private');
-  assert.equal(meta.version, '0.3.0');
+  assert.equal(meta.version, '0.4.0');
   assert.equal(meta.publishConfig?.access, 'public');
   assert.equal(typeof meta.repository?.url, 'string');
   assert.equal(meta.scripts?.prepack, 'npm run build', 'prepack rebuilds before pack');
@@ -162,7 +162,7 @@ test('packed declarations typecheck in a consumer', { skip: !built && 'run `npm 
   const { tmp } = packAndUnpack();
   const consumer = installConsumer(tmp, 'consumer-types');
   writeFileSync(join(consumer, 'consumer.ts'), `
-import { createProgram, encodeCall, rawCalldata, compile, SELF, type CompiledProgram } from '@bosorus/lisa-evm';
+import { createProgram, encodeCall, rawCalldata, compile, SELF, type CompiledProgram, type TryCallResult, type Value } from '@bosorus/lisa-evm';
 import { program, push, add, stop } from '@bosorus/lisa-evm/api';
 import type { Program } from '@bosorus/lisa-evm/ast';
 
@@ -171,6 +171,14 @@ const v = p.staticCall(SELF, encodeCall('transfer(address,uint256)', [SELF, 7n])
 p.if(v.gt(1), () => { p.call(SELF, encodeCall('done(uint256)', [v])); });
 const raw = rawCalldata('0xdeadbeef');
 p.staticCall(SELF, raw).word(32);
+const attempted: TryCallResult = p.tryStaticCall(SELF, raw);
+const success: Value = attempted.success;
+p.if(success, () => {});
+// @ts-expect-error success is a runtime Value, not a JavaScript boolean
+const invalid: boolean = attempted.success;
+void invalid;
+const sent = p.tryCall(SELF, raw);
+p.if(sent.success, () => {});
 const high: CompiledProgram = p.compile();
 const q: Program = program(push(2), push(3), add, stop);
 const low: CompiledProgram = compile(q);
