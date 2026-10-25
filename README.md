@@ -79,105 +79,21 @@ If LISA is embedded in or delegated to by a smart wallet, the same principle app
 
 ## TypeScript toolchain
 
-The `ts/` directory contains the TypeScript toolchain around the runtime. It has two levels of API; both lower into the same AST, compiler, and encoder:
-
-```text
-TypeScript-first API  ->  high-level representation  ->  AST  ->  compiler (labels)  ->  encoder  ->  bytecode  ->  LISA.yul
-createProgram, Values,        program(), push(),       (the builder emits plain
-encodeCall, p.if              add, ...                  AST nodes)
-```
-
-The reverse direction (`bytecode -> disassembler -> decoded instructions`) is equally direct. The canonical instruction set — opcodes, operand widths, stack effects — is defined once in `ts/src/isa.ts` and mirrors `yul/LISA.yul`, which remains the authoritative execution semantics.
-
-Working inside this repository requires Node.js >= 23.6 because development tests run TypeScript directly (no build step); the published package itself only needs Node.js >= 22 or a modern browser. The toolchain's only runtime dependency is `@noble/hashes`, used for the Keccak-256 hashes behind ABI selectors; compiled programs themselves depend on nothing. External projects consume the toolchain from npm as [`@bosorus/lisa-evm`](ts/README.md) — see [Using as a package](#using-as-a-package) below. When working inside this repository without installing the package, the same modules are the `ts/src/<module>.ts` files shown in the examples.
-
-### TypeScript-first API
-
-`createProgram()` (`ts/src/builder.ts`, with `ts/src/expr.ts` and `ts/src/abi.ts`) writes programs in terms of values and calls instead of a manual stack. The builder maintains a shadow stack and resolves every `DUP`/`SWAP` itself:
-
-```ts
-import { createProgram, encodeCall, SELF } from '@bosorus/lisa-evm';
-
-const p = createProgram();
-
-// STATICCALL with a runtime ABI argument: the SELF placeholder is patched
-// into the copied blob at its word offset, and the returned word is read
-// lazily (RDLOAD) when decoded as uint256().
-const balance = p.staticCall(SELF, encodeCall('balanceOf(address)', [SELF])).uint256();
-
-p.if(balance.gt(1000), () => {
-  // Reusing `balance` inside the branch lowers to the correct DUP depth.
-  p.call(SELF, encodeCall('execute(uint256)', [balance]));
-});
-
-// Checked calls revert the LISA program on external failure. Use tryCall or
-// tryStaticCall to branch on a runtime success Value and keep executing.
-const attempt = p.tryCall(SELF, encodeCall('claim()'));
-p.if(
-  attempt.success,
-  () => p.call(SELF, encodeCall('recordSuccess()')),
-  () => p.call(SELF, encodeCall('recordFailure()')),
-);
-
-const c = p.compile();  // same compiler and encoder as the AST layer below
-```
-
-This layer provides runtime values (`SELF`, `CALLER`, `TIMESTAMP`, any account's `p.balance(addr)`, decoded return-data words, and arithmetic/comparison over them), a static ABI subset for calldata (`encodeCall` — narrow-type runtime arguments are range-checked inside the emitted program, and runtime `bytesN` arguments are refused rather than silently misaligned), checked `call`/`staticCall` methods that revert the LISA program on failure, recoverable `tryCall`/`tryStaticCall` methods whose `result.success` is a runtime `Value` for `p.if(result.success, then, else?)`, structured branches whose local values are popped before the join, `p.revertUnless(condition)` to abort on a violated invariant, `p.keccak(bytes)` to hash data carried with the program, `emitUnsafe` as the raw-AST escape hatch for stack-neutral emission, and a clear `LoweringError` when a program would exceed LISA's 16-word stack instead of emitting broken bytecode. Failed calls can still return revert data; do not interpret it as a successful ABI return value. A captured success value remains usable after a later call, while earlier returndata reads become stale.
-
-Calldata encoded elsewhere drops straight into the same call path, and any 32-byte return-data word is readable:
-
-```ts
-p.call(target, rawCalldata('0xa9059cbb...'));        // pre-encoded, no ABI parsing
-
-const result = p.staticCall(target, encodeCall('pair()'));
-const firstWord = result.uint256();                  // word at byte offset 0
-const secondWord = result.word(32);                  // ...or any aligned word
-```
-
-### AST API
-
-The low-level API that the builder lowers into remains fully available:
-
-```ts
-import { program, push, label, jz, jmp, add, sub, swap, dup, pop, stop } from '@bosorus/lisa-evm/api';
-import { compile, disassemble } from '@bosorus/lisa-evm';
-
-// Countdown loop with symbolic labels — no manual jump offsets.
-const p = program(
-  push(0),            // accumulator
-  push(3),            // counter
-  label('head'),
-  dup(1),
-  jz('done'),         // forward label
-  swap(2), push(1), add,
-  swap(2), push(1), sub,
-  jmp('head'),        // backward label
-  label('done'),
-  pop,
-  stop,
-);
-
-const c = compile(p);
-c.hex;                          // 0x0100010322012c000f230201012423020101252b80102100
-disassemble(c.bytes);           // ["PUSH1 0x0", "PUSH1 0x3", ..., "JZ +15 -> 22", ...]
-```
-
-Jumps encode the VM's 16-bit sign-magnitude offsets relative to the operand field (opcode address + 1); the compiler resolves labels, and `encode`/`decode` handle the widths, immediates, and blobs. Byte-level details are exercised in `ts/test/` and executed against the real Yul runtime through generated fixtures (`ts/tools/gen-runtime-fixtures.ts` -> `test/LISATooling.t.sol`).
-
-### Using as a package
-
-The toolchain is published from `ts/` as the public ESM package **`@bosorus/lisa-evm`**. Consumer documentation lives in [`ts/README.md`](ts/README.md):
+The `ts/` directory provides the public ESM package **`@bosorus/lisa-evm`**.
+It builds LISA program bytes with a high-level builder or a low-level AST and
+compiler, and it decodes or disassembles those bytes for inspection. The SDK
+does not execute programs or connect to a chain.
 
 ```bash
 npm install @bosorus/lisa-evm
 ```
 
-```ts
-import { createProgram, encodeCall, rawCalldata, compile, decode, disassemble, SELF } from '@bosorus/lisa-evm';
-import { program, push, add, stop } from '@bosorus/lisa-evm/api'; // low-level AST, deep import
-```
-
-The root entry exposes the builder, ABI calldata, `compile`, and the decoder. The lower-level plumbing stays available through documented subpaths — `@bosorus/lisa-evm/api`, `/ast`, `/compile`, `/encode`, `/decode`, `/isa`, `/bytes`, `/expr`, `/abi`, `/builder` — and equals the `ts/src/<module>.ts` files shown in the examples above. Keccak glue is internal; `@noble/hashes` is the package's only third-party runtime import, and nothing in the built package touches Node builtins, the filesystem, or repository paths, so it runs unmodified in browsers (tests and fixture generators may use Node, and are excluded from the package). The published artifact works on Node.js >= 22 and modern browsers; the Node >= 23.6 requirement is for developing in this repository, not for consuming the package.
+Start with the [SDK quickstart and feature index](ts/README.md), then use the
+[API reference](ts/docs/api.md), [examples](ts/docs/examples.md),
+[concepts](ts/docs/concepts.md), [low-level reference](ts/docs/low-level.md),
+or [troubleshooting guide](ts/docs/troubleshooting.md). The package runs on
+Node.js >= 22 and modern browsers. Working on this repository requires
+Node.js >= 23.6 and Foundry.
 
 ## Build and test
 

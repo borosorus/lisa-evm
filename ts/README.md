@@ -1,168 +1,102 @@
 # @bosorus/lisa-evm
 
-TypeScript SDK for **LISA**, an experimental stack-based virtual machine. This
-package builds LISA programs — a high-level program builder, ABI calldata, an
-AST, a compiler with symbolic labels, an encoder, and a decoder/disassembler —
-and emits plain program bytes.
+TypeScript SDK for building **LISA** programs. It provides a program builder,
+ABI calldata helpers, a low-level AST and compiler, and bytecode inspection.
+The output is plain `Uint8Array` or hex program bytes. This package does not
+execute programs or connect to a chain.
 
-It is a **compiler, not an executor**: it produces `Uint8Array`/hex program
-bytes and needs no deployed runtime, RPC, or chain configuration. Execution
-semantics are defined by the authoritative runtime,
-[`yul/LISA.yul`](https://github.com/borosorus/lisa-evm/blob/main/yul/LISA.yul),
-in the [lisa-evm](https://github.com/borosorus/lisa-evm) repository. This
-package mirrors that ISA; when the two disagree, the Yul runtime is right.
+The package is ESM, supports Node.js >= 22 and modern browsers, and has one
+runtime dependency: `@noble/hashes` for ABI selectors. LISA execution
+semantics are defined by the [Yul runtime](https://github.com/borosorus/lisa-evm/blob/main/yul/LISA.yul).
 
-The standalone runtime is deployed on Ethereum mainnet at
-[`0x7F6b058AAF78BC690f781F0914499C460Ff342D9`](https://etherscan.io/address/0x7F6b058AAF78BC690f781F0914499C460Ff342D9);
-send compiled program bytes as calldata to execute them there.
-
-## Install
+## Install and build a program
 
 ```bash
 npm install @bosorus/lisa-evm
 ```
 
-ESM only. Works in modern browsers (bundlers included) and Node.js >= 22. The
-only runtime dependency is [`@noble/hashes`](https://www.npmjs.com/package/@noble/hashes)
-(Keccak-256 for ABI selectors, needed at program-build time).
-
-## Build a program
-
-`createProgram()` writes programs in terms of values and calls instead of a
-manual stack; the builder resolves `DUP`/`SWAP` depths and stack cleanup for
-you and raises `LoweringError` rather than emitting broken bytecode:
-
 ```ts
-import { createProgram, encodeCall, SELF } from '@bosorus/lisa-evm';
+import { createProgram, encodeCall } from '@bosorus/lisa-evm';
 
+// Replace this illustrative address with a contract that has count() and
+// setCount(uint256). Building the program needs no RPC connection.
+const target = '0x1111111111111111111111111111111111111111';
 const p = createProgram();
 
-const balance = p.staticCall(SELF, encodeCall('balanceOf(address)', [SELF])).uint256();
-p.if(balance.gt(1000), () => {
-  p.call(SELF, encodeCall('execute(uint256)', [balance]));
+const read = p.tryStaticCall(target, encodeCall('count()'));
+p.if(read.success, () => {
+  const count = read.uint256();
+  p.if(count.gt(10n), () => {
+    p.call(target, encodeCall('setCount(uint256)', [count]));
+  });
 });
 
-const attempt = p.tryCall(SELF, encodeCall('claim()'));
-p.if(
-  attempt.success,
-  () => p.call(SELF, encodeCall('recordSuccess()')),
-  () => p.call(SELF, encodeCall('recordFailure()')),
-);
-
-const program = p.compile(); // { bytes: Uint8Array; hex: string; ... }
+const program = p.compile();
+program.bytes; // Uint8Array
+program.hex;   // 0x-prefixed hex
 ```
 
-`if` takes an optional third argument for the other path. Each branch body is
-its own scope: values it creates are popped before the two paths join, and
-touching one after the branch closed raises `LoweringError`:
+`tryStaticCall()` lets the LISA program continue after an external call fails.
+Its `success` is a **runtime `Value`**, so branch with `p.if()` rather than a
+JavaScript `if`. `call()` and `staticCall()` are checked calls that revert the
+LISA program on failure. [How values and calls work](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/concepts.md)
 
-```ts
-p.if(
-  balance.gt(1000),
-  () => p.call(SELF, encodeCall('execute(uint256)', [balance])),
-  () => p.call(SELF, encodeCall('queue(uint256)', [balance])),
-);
-```
+## Find a feature
 
-`call()` and `staticCall()` are checked: a failed external call reverts the
-LISA program. `tryCall()` and `tryStaticCall()` continue and return a
-`TryCallResult`; its `success` is a runtime `Value` that works with `p.if`,
-`revertUnless`, and other value operations. The flag occupies a stack slot until
-its scope closes. Return data remains tracked per path: a result decoded before
-the `if` stays readable in a branch that makes no later call, and after the join
-only if neither branch called again. A later call does not invalidate an
-already captured `success` value. Failed calls may still return revert data;
-callers must not assume that failed-call returndata is a successful ABI return
-value.
+| I want to... | Use | Read |
+| --- | --- | --- |
+| Build a program | `createProgram()`, `p.compile()` | [API: build](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#build-a-program) |
+| Encode a function call | `encodeCall()`, `selectorOf()` | [API: ABI calldata](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#abi-calldata) |
+| Use calldata encoded elsewhere | `rawCalldata()` | [Example](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/examples.md#use-calldata-encoded-elsewhere) |
+| Make a checked or recoverable call | `call()`, `staticCall()`, `tryCall()`, `tryStaticCall()` | [API: calls](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#programbuilder-calls) |
+| Read return data | `CallResult.word()`, `uint256()`, `bytes32()`, `bool()` | [Concepts: return data](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/concepts.md#calls-and-return-data) |
+| Branch or guard an invariant | `p.if()`, `p.revertUnless()`, `Value.gt()` and other comparisons | [API: control flow](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#control-flow-and-values) |
+| Read runtime context or balance | `SELF`, `CALLER`, `GAS`, `TIMESTAMP`, `SELFBALANCE`, `p.balance()` | [API: context words](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#value-and-context-words) |
+| Hash embedded bytes | `p.keccak()` | [Example](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/examples.md#guard-a-balance-and-hash-embedded-bytes) |
+| Inspect program bytes | `decode()`, `disassemble()` | [API: byte inspection](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#compile-and-inspect-bytes) |
+| Write instructions and labels directly | `@bosorus/lisa-evm/api`, `compile()` | [Low-level reference](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/low-level.md) |
+| Diagnose an error | `LoweringError`, `CompileError`, `DecodeError` | [Troubleshooting](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/troubleshooting.md) |
 
-Pre-encoded calldata drops straight into the same call path, and any aligned
-32-byte return-data word is readable:
+## API index and imports
 
-```ts
-import { createProgram, rawCalldata, SELF } from '@bosorus/lisa-evm';
+The package root is the application-facing import. These groups are available
+from `@bosorus/lisa-evm`; the linked reference lists their signatures and
+behavior.
 
-const p = createProgram();
-// transfer(address,uint256) encoded elsewhere — no ABI parsing here.
-p.call(SELF, rawCalldata('0xa9059cbb0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000000000000000000000000000000000000000002a'));
+| Symbols | Reference |
+| --- | --- |
+| `createProgram`, `ProgramBuilder`, `AddressLike`, `LoweringError` | [Builder](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#build-a-program) |
+| `CallResult`, `TryCallResult` | [Call results](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#callresult-and-trycallresult) |
+| `Value`, `ValueLike`, `ValueTerm`, `BinKind`, `literal`, `toValue`, `context`, `binop`, `SELF`, `CALLER`, `GAS`, `TIMESTAMP`, `SELFBALANCE` | [Values](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#value-and-context-words) |
+| `encodeCall`, `rawCalldata`, `selectorOf`, `parseSignature`, `CallData`, `AbiCallData`, `AbiArg`, `AbiPatch` | [ABI calldata](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#abi-calldata) |
+| `compile`, `CompiledProgram`, `CompileError`, `decode`, `disassemble`, `DecodedInstruction`, `DecodeError` | [Compile and inspect](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md#compile-and-inspect-bytes) |
+| `Node`, `NoOperandOp`, `Program` | [AST and subpaths](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/low-level.md) |
 
-const result = p.staticCall(SELF, rawCalldata('0xc45a815d'));
-const secondWord = result.word(32);             // word at byte offset 32
-```
-
-An account's ETH balance needs no call and no contract in between:
-
-```ts
-import { createProgram, encodeCall, CALLER, SELF } from '@bosorus/lisa-evm';
-
-const p = createProgram();
-p.if(p.balance(CALLER).gt(10n ** 18n), () => {
-  p.call(SELF, encodeCall('settle()'));
-});
-```
-
-The address accepts anything word-shaped — a `Value`, a hex address, bytes. Like
-`GAS` and `SELFBALANCE`, `p.balance(...)` is an expression rather than a stack
-slot: it lowers where the value is used, so a balance checked in a condition
-costs no slot and each use re-reads the account.
-
-An invariant worth aborting on gets a guard, and hashing bytes that travel with
-the program has a direct form:
-
-```ts
-import { createProgram, encodeCall, CALLER, SELF } from '@bosorus/lisa-evm';
-
-const p = createProgram();
-p.revertUnless(p.balance(CALLER).gt(10n ** 18n)); // revert instead of continuing
-const digest = p.keccak('0xdeadbeef');
-p.call(SELF, encodeCall('claim(uint256)', [digest]));
-```
-
-`revertUnless` emits the same `JZ -> REVERT` guard the builder emits for a failed
-call, and costs no slot; LISA's `REVERT` carries no revert data. `keccak` is a
-slot rather than an expression — the data is copied (`BLOB`) and hashed once per
-call, so reusing the `Value` duplicates the digest instead of re-copying and
-re-hashing, and the slot lives until its scope closes. Hashing data that only
-exists at runtime needs LISA's memory API, which the builder does not expose yet.
-
-## Inspect bytecode
+For AST constructors and encoding internals, import documented subpaths such
+as `@bosorus/lisa-evm/api`, `/compile`, `/encode`, `/decode`, `/isa`, and
+`/bytes`. All ten subpaths and their exports are listed in the
+[low-level reference](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/low-level.md).
 
 ```ts
 import { compile, decode, disassemble } from '@bosorus/lisa-evm';
 import { program, push, add, stop } from '@bosorus/lisa-evm/api';
 
-const programBytes = compile(program(push(2), push(3), add, stop)).bytes;
-disassemble(programBytes);   // ["PUSH1 0x2", "PUSH1 0x3", "ADD", "STOP"]
-decode(programBytes);        // structured instructions (name, operand, offset, size)
+const bytes = compile(program(push(2), push(3), add, stop)).bytes;
+disassemble(bytes); // ['PUSH1 0x2', 'PUSH1 0x3', 'ADD', 'STOP']
+decode(bytes);      // instruction objects with byte offsets and operands
 ```
 
-## Low-level subpaths
+## Read next
 
-The AST layer the builder lowers into is available through documented
-subpath imports:
+- [Concepts and runtime values](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/concepts.md): JavaScript versus LISA, stack slots, scopes, calls, and return data.
+- [Public API reference](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/api.md): root exports, signatures, inputs, and errors.
+- [Low-level API and import paths](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/low-level.md): AST, compiler, encoder, decoder, ISA, and bytes.
+- [Copyable examples](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/examples.md): common program-building tasks.
+- [Troubleshooting](https://github.com/borosorus/lisa-evm/blob/main/ts/docs/troubleshooting.md): common build and runtime problems.
 
-```ts
-import { program, push, add, stop } from '@bosorus/lisa-evm/api';
-import { compile } from '@bosorus/lisa-evm/compile';
-
-compile(program(push(2), push(3), add, stop)).hex; // 0x010201032400
-```
-
-Available subpaths: `api` (AST constructors), `ast` (AST types), `compile`,
-`encode`, `decode`, `isa` (canonical opcode table), `bytes` (hex/byte
-helpers), `expr`, `abi`, `builder`. The root entry is the curated
-application-facing surface; internal plumbing (e.g. Keccak glue) stays out of
-the root.
-
-## Notes
-
-- Raw AST nodes go through `emitUnsafe(...nodes)`, the escape hatch around the
-  shadow stack. What it appends must leave every value the builder tracks at the
-  same stack position with the same contents — keeping only the stack depth is
-  not enough — and nothing checks it. The old `emit` name remains as a
-  deprecated alias.
-- Programs are address-free by design: nothing here bakes in chain or runtime
-  addresses. How program bytes reach a deployed runtime (calldata, an
-  embedding wallet, `DELEGATECALL`) is an execution concern outside this
-  package.
-- Repository development requirements (Node >= 23.6, Foundry) do **not**
-  apply to consumers of this package.
+Programs are address-free: no runtime address, RPC endpoint, or wallet is
+embedded by this SDK. The repository's standalone Yul runtime is deployed on
+[Ethereum mainnet](https://etherscan.io/address/0x7F6b058AAF78BC690f781F0914499C460Ff342D9),
+but execution and authorization belong to the host application. Repository
+development requires Node.js >= 23.6 and Foundry; package consumers only need
+the published Node/browser support above.
